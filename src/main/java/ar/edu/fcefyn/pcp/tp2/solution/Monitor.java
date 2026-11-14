@@ -6,6 +6,7 @@ package ar.edu.fcefyn.pcp.tp2.solution;
 import ar.edu.fcefyn.pcp.tp2.api.MonitorInterface;
 import ar.edu.fcefyn.pcp.tp2.api.PetriNetConfig;
 import java.util.concurrent.locks.ReentrantLock;
+import java.util.concurrent.locks.Condition;
 
 public class Monitor implements MonitorInterface {
 
@@ -15,6 +16,8 @@ public class Monitor implements MonitorInterface {
     private final int[][] incidencia;   // I = I+ - I- cuanto cambia cada plaza cuando se dispara una transicion
     private final int[] marcado;        // tokens actuales en cada plaza
     private final ReentrantLock lock = new ReentrantLock(true);
+    private final Condition[] colas;   // una sala de espera por transición
+    private final int[] esperando;     // cuantos hilos hay en cada sala
 
     //constructor
     //el monitor es agnostico solo recibe numeros si cambiamos la red cambiaria la configuracion y el Monitor queda igual
@@ -22,6 +25,13 @@ public class Monitor implements MonitorInterface {
         this.pre = config.matrixPre();
         this.incidencia = config.matrixIncidencia();
         this.marcado = config.marcadoInicial().clone();
+        int n = config.numTransiciones();
+        this.colas = new Condition[n];
+        for (int i = 0; i < n; i++) {
+            colas[i] = lock.newCondition();   // cada sala esta atada a este lock
+        }
+        this.esperando = new int[n];
+
     }
 
     // fireTransition(t) es el metodo principal: a lo que llama cada hilo para disparar la transicion t
@@ -29,11 +39,17 @@ public class Monitor implements MonitorInterface {
     public boolean fireTransition(int t) {
         lock.lock(); // toma el lock, si lo tiene otro espera
         try {
-            if (!estaSensibilizada(t)) {
-                return false; // PROVISORIO: en el paso 3 el hilo va a esperar acá
+            while (!estaSensibilizada(t)) { // aca ponemos un while por que vuelve a chequear si hay token
+                esperando[t]++;        // se anota en la sala de t, para llevar la cuenta
+                colas[t].await();      // duerme (y suelta el lock)
+                esperando[t]--;        // se despierta: se borrs de la lista
             }
             disparar(t);
+            despertarSensibilizadas();
             return true;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return false;
         } finally {
             lock.unlock(); // deja el lock
         }
@@ -56,6 +72,13 @@ public class Monitor implements MonitorInterface {
     private void disparar(int t) {
         for (int p = 0; p < marcado.length; p++) {
             marcado[p] += incidencia[p][t];
+        }
+    }
+    private void despertarSensibilizadas() {
+        for (int i = 0; i < esperando.length; i++) {
+            if (esperando[i] > 0 && estaSensibilizada(i)) {
+                colas[i].signal();   // despierta a un solo hilo de la sala despues al siguiente es una cadena
+            }
         }
     }
 }
