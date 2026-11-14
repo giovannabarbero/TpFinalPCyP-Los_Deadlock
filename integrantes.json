@@ -1,0 +1,27 @@
+{
+  "grupo": "Los Deadlock",
+  "repositorio": "https://github.com/giovannabarbero/TpFinalPCyP-Los_Deadlock",
+  "integrantes": [
+    {
+      "nombre": "Thomas von Büren",
+      "documento": "43136697",
+      "usuarioGit": "ThomasVonBuren"
+    },
+    {
+      "nombre": "Maria Clara Fernandez",
+      "documento": "44428018",
+      "usuarioGit": "mariaclarafernandez"
+    },
+    {
+      "nombre": "Giovanna Luz Barbero",
+      "documento": "46509956",
+      "usuarioGit": "giovannabarbero"
+    },
+    {
+      "nombre": "Guillermina Frenguelli",
+      "documento": "45154313",
+      "usuarioGit": "gfrenguelli-byte"
+    }
+  ]
+}
+
