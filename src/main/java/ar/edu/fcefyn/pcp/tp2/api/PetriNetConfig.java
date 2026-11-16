@@ -6,7 +6,7 @@ public record PetriNetConfig(
         int[][] matrixPre,              // I-
         int[][] matrixIncidencia,       // I
         int[] marcadoInicial,           // M_0
-        long[] tiempoMS,                // 0 inmediato, >0 temp
+        long[] tiempoMS,                // 0 immediate, >0 temp
         int[] pesosPrio,                // Peso para politica a priorizar
         int[][] invariantesP,           // Eq de invariants plaza
         int[] sumInvariantesP,          // Const. esperadas de c/d eq
