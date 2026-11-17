@@ -5,8 +5,12 @@ package ar.edu.fcefyn.pcp.tp2.solution;
 
 import ar.edu.fcefyn.pcp.tp2.api.MonitorInterface;
 import ar.edu.fcefyn.pcp.tp2.api.PetriNetConfig;
+
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.concurrent.locks.Condition;
+
+import ar.edu.fcefyn.pcp.tp2.api.Politica;
+import ar.edu.fcefyn.pcp.tp2.api.TransitionLogger;
 
 public class Monitor implements MonitorInterface {
 
@@ -20,10 +24,16 @@ public class Monitor implements MonitorInterface {
     private final int[] esperando;     // cuantos hilos hay en cada sala
     private final int[][] invariantesP;   // una fila por invariante, y una columna por plaza osea es una matriz
     private final int[] sumInvariantesP;  // cuanto tiene que dar cada suma
+    private final Politica politica;          // decide en los conflictos (se usa en el paso 4)
+    private final TransitionLogger logger;  // registra cada disparo en el archivo de log
+    private final int transicionFin;       // que transicion marca un invariante completo (T9)
+    private final int objetivo;          // cuantas veces tiene que dispararse (200)
+    private int disparosFin = 0;           // cuantas veces se disparo hasta ahora
+    private boolean finished = false;       // true = el sistema termino
 
     //constructor
     //el monitor es agnostico solo recibe numeros si cambiamos la red cambiaria la configuracion y el Monitor queda igual
-    public Monitor(PetriNetConfig config) {
+    public Monitor(PetriNetConfig config, Politica politica, TransitionLogger logger) {
         this.pre = config.matrixPre();
         this.incidencia = config.matrixIncidencia();
         this.marcado = config.marcadoInicial().clone();
@@ -37,27 +47,46 @@ public class Monitor implements MonitorInterface {
         this.invariantesP = config.invariantesP();
         this.sumInvariantesP = config.sumInvariantesP();
 
+        this.politica = politica;
+        this.logger = logger;
+
+        // la condicion de fin viene de config
+        this.transicionFin = config.transicionFinInvariantes();
+        this.objetivo = config.objetivoInvariantes();
     }
+
 
     // fireTransition(t) es el metodo principal: a lo que llama cada hilo para disparar la transicion t
     @Override
     public boolean fireTransition(int t) {
-        lock.lock(); // toma el lock, si lo tiene otro espera
+        lock.lock();
         try {
-            while (!estaSensibilizada(t)) { // aca ponemos un while por que vuelve a chequear si hay token
-                esperando[t]++;        // se anota en la sala de t, para llevar la cuenta
-                colas[t].await();      // duerme (y suelta el lock)
-                esperando[t]--;        // se despierta: se borrs de la lista
+            while (!finished && !estaSensibilizada(t)) { // espera solo si NO termino y NO puede disparar
+                esperando[t]++;
+                colas[t].await();
+                esperando[t]--;
+            }
+            if (finished) {
+                return false;                  // el sistema termino: el hilo tiene que salir
             }
             disparar(t);
-            verificarInvariantesPlaza(); // despues de cada disparo chequeamos
+            verificarInvariantesPlaza();
+            logger.logTransition(t);           // dentro del lock: el log queda en el orden real
+            if (t == transicionFin) {          // se disparo T9
+                disparosFin++;                 // un invariante completo mas
+                if (disparosFin >= objetivo) { // llegamos a 200
+                    finished = true;
+                    despertarATodos();
+                    return true;
+                }
+            }
             despertarSensibilizadas();
             return true;
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             return false;
         } finally {
-            lock.unlock(); // deja el lock
+            lock.unlock();
         }
     }
 
@@ -73,13 +102,15 @@ public class Monitor implements MonitorInterface {
         }
         return true;
     }
-   //disparar es la ecuacion para el estado
-   //a cada plaza le suma lo que dice la columna t de la incidencia
+
+    //disparar es la ecuacion para el estado
+    //a cada plaza le suma lo que dice la columna t de la incidencia
     private void disparar(int t) {
         for (int p = 0; p < marcado.length; p++) {
             marcado[p] += incidencia[p][t];
         }
     }
+
     // despertarSensibilizadas
     // despues de disparar revisa las salas si una transicion quedo sensibilizada
     // y tiene hilos esperando despierta a uno
@@ -90,6 +121,7 @@ public class Monitor implements MonitorInterface {
             }
         }
     }
+
     // verificarInvariantesPlaza
     // para cada invariante suma los tokens de las plazas que le corresponden
     // (coeficiente 1 = suma esa plaza si es 0 = la ignora)
@@ -104,6 +136,15 @@ public class Monitor implements MonitorInterface {
                 throw new IllegalStateException("Invariante de plaza " + i + " violado: suma = "
                         + suma + ", esperado = " + sumInvariantesP[i]);
             }
+        }
+    }
+
+    // despertarATodos
+// cuando el sistema termina, despierta a TODOS los hilos de TODAS las salas
+// asi ninguno queda dormido para siempre
+    private void despertarATodos() {
+        for (Condition cola : colas) {
+            cola.signalAll();
         }
     }
 }

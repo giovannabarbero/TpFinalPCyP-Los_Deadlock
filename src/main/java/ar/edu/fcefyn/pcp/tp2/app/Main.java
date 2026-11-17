@@ -50,8 +50,7 @@ public class Main {
             // 1. ahora compila con el Monitor v1 actual (solo recibe config).
             // 2. cuando suban sus ramas, comentar la línea de abajo y
             //    descomentar el bloque de politica + ponitor completo.
-            MonitorInterface monitor = new Monitor(config);
-
+            MonitorInterface monitor = new Monitor(config, null, logger);
             /*
             Politica politica = (codigoPolitica == POLITICA_PRIORIZADA)
                     ? new PoliticaPriorizada(config.pesosPrio())
