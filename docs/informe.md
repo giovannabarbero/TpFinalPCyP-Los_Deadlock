@@ -124,4 +124,113 @@ Poseemos un `FileTransitionLogger` que cumple el rol de *Output Queue* para cont
 
 *Imagen n : Grafico de Hilos en Red de Petri*
 
+# Análisis de la Red de Petri en PIPE
+
+Para garantizar la validez estructural y dinámica del sistema antes de su implementación, se modeló la Red de Petri Estocástica Generalizada en PIPE v5.0.2 y se ejecutaron los módulos de exploración del espacio de estados y análisis estacionario.
+
+### Estructura de la Red y Clasificación de Elementos
+
+La red modela el procesamiento concurrente de transacciones mediante tres flujos alternativos que compiten por dos recursos comparitdos:
+
+* Plazas de flujo y control: `P0` representa la cola de entrada con un marcado inicial $M_0(P_0) = 3$ (nivel máximo de concurrencia simultánea). `P1` modela el punto de admisión y enrutamiento; `P2`- `P6` representan las etapas internas de cada rama de procesamiento; y `P9`constituye el buffer de salida previo al retorno del ciclo.
+* Plazas de recursos compartidos: `P7` y `P8` inician con $1$ token cada una ($M_0(P_7) = 1$, $M_0(P_8) = 1$), modelando recursos de acceso exclusivo.
+* Transiciones inmediatas (`T0`, `T1`, `T4`, `T6`, `T9`): Representadas por barras negras; se disparan sin retardo temporal en cuanto se habilitan.
+* Transiciones temporizadas (`T2`, `T3`, `T5`, `T7`, `T8`): Representadas por rectángulos blancos; introducen retardos asociados al tiempo de procesamiento de cada etapa.
+
+---
+
+### Análisis de Invariantes (P-invariantes y T-invariantes)
+
+#### Invariantes de Plaza (P-invariantes)
+Los P-invariantes definen leyes lineales de conservación de tokens que se mantienen constantes para cualquier estado alcanzable de la red:
+
+1. Conservación total de transacciones en el sistema:
+   $$M(P_0) + M(P_1) + M(P_2) + M(P_3) + M(P_4) + M(P_5) + M(P_6) + M(P_9) = 3$$
+   Interpretación: El número total de transacciones circulando entre la entrada, las tres ramas de procesamiento y la salida es siempre igual a $3$. No se crean ni se pierden hilos de trabajo durante la ejecución.
+
+2. Exclusión mutua sobre el recurso `P7`:
+   $$M(P_7) + M(P_2) + M(P_3) + M(P_4) = 1$$
+   Interpretación: El recurso `P7` permanece libre ($M(P_7)=1$) o asignado exclusivamente a una única transacción en la rama superior (`P2`, `P3`) o en la rama central (`P4`), impidiendo el acceso simultáneo.
+
+3. Exclusión mutua sobre el recurso `P8`:
+   $$M(P_8) + M(P_4) + M(P_5) + M(P_6) = 1$$
+   Interpretación: El recurso `P8` permanece libre ($M(P_8)=1$) o asignado exclusivamente a una transacción en la rama central (`P4`) o en la rama inferior (`P5`, `P6`).
+
+#### Invariantes de Transición (T-invariantes)
+Los T-invariantes representan las secuencias mínimas de disparos que procesan una transacción completa y devuelven la red a su marcado inicial:
+
+* T-invariante 1 (Flujo superior — usa `P7`):
+  $$T_0 \rightarrow T_1 \rightarrow T_2 \rightarrow T_3 \rightarrow T_9$$
+* T-invariante 2 (Flujo central — usa `P7` y `P8` en simultáneo):
+  $$T_0 \rightarrow T_4 \rightarrow T_5 \rightarrow T_9$$
+* T-invariante 3 (Flujo inferior — usa `P8`):
+  $$T_0 \rightarrow T_6 \rightarrow T_7 \rightarrow T_8 \rightarrow T_9$$
+
+Todas las transiciones de la red están cubiertas por al menos un T-invariante, condición estructural necesaria para la vivacidad del modelo.
+
+
+
+### Verificación del Espacio de Estados (Reachability Graph)
+
+Mediante el módulo *State Space Explorer* de PIPE se generó tanto el grafo reducido a estados tangibles como el grafo completo incluyendo estados evanescentes (vanishing states):
+
+* Grafo reducido (estados tangibles): Consta de 5 estados tangibles y 10 transiciones. Tras abandonar el estado inicial (`State 1`), el sistema evoluciona dentro de un ciclo cerrado compuesto por los estados `0`, `2`, `3` y `4`.
+
+![Grafo de alcanzabilidad reducido a estados tangibles](GrafoReducido.png)
+
+* Grafo completo (tangibles + evanescentes): Al incluir los estados intermedios instantáneos (vanishing), el espacio alcanza exactamente 33 estados (5 tangibles y 28 evanescentes) y 56 transiciones, confirmando que el espacio de estados es finito.
+
+![Grafo de alcanzabilidad completo](GrafoCompleto.png)
+
+A partir de ambos grafos se verifican las propiedades formales exigidas:
+
+| Propiedad                     | Estado en PIPE                            | Justificación Formal |
+|:------------------------------|:------------------------------------------| :--- |
+| **Ausencia de *Deadlock***    | Verificada (Deadlock-free)                | Ningún nodo del grafo es un estado sumidero; desde todo estado alcanzable existe al menos una transición habilitada. |
+| **Vivacidad (Liveness)**      | Viva                                      | Los estados tangibles `0`, `2`, `3` y `4` conforman una componente fuertemente conexa donde todas las transiciones ($T_0$–$T_9$) pueden volver a dispararse indefinidamente. |
+| **Acotamiento (Boundedness)** | 3-Acotada                                 | El espacio tiene un número finito de estados (33). Ninguna plaza supera los 3 tokens en ningún estado alcanzable. |
+| **Seguridad (1-Safeness)**    | Parcial (1-segura en recursos e internas) | Las plazas `P2`–`P8` nunca superan 1 token, mientras que las plazas de cola/buffer (`P0`, `P1`, `P9`) alcanzan hasta 3 tokens debido al marcado inicial $M_0(P_0) = 3$. |
+
+---
+
+### Análisis Estocástico en Estado Estacionario (GSPN Analysis)
+
+Al ejecutar el módulo GSPN Analysis en PIPE (con tasas exponenciales unitarias por defecto $\lambda = 1,0$ en las transiciones temporizadas), se obtuvieron los siguientes indicadores en régimen estacionario:
+
+#### Marcado de los Estados Tangibles
+| Estado | `P0` | `P1` | `P2` | `P3` | `P4` | `P5` | `P6` | `P7` | `P8` | `P9` |
+| :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| **0** | 0 | 1 | 1 | 0 | 0 | 1 | 0 | 0 | 0 | 0 |
+| **1** | 0 | 2 | 0 | 0 | 1 | 0 | 0 | 0 | 0 | 0 |
+| **2** | 0 | 1 | 1 | 0 | 0 | 0 | 1 | 0 | 0 | 0 |
+| **3** | 0 | 1 | 0 | 1 | 0 | 1 | 0 | 0 | 0 | 0 |
+| **4** | 0 | 1 | 0 | 1 | 0 | 0 | 1 | 0 | 0 | 0 |
+
+#### Distribución Estacionaria, Ocupación Media y Throughput
+| Estado | Probabilidad Estacionaria | Plaza | Promedio de Tokens ($\bar{M}$) | Transición Temporizada | *Throughput* Medio |
+| :---: | :---: | :---: | :---: | :---: | :---: |
+| **0** | `0,250` | `P0` / `P9` | `0,000` | `T2` | `0,500` |
+| **1** | `0,000` | `P1` | `1,000` | `T3` | `0,500` |
+| **2** | `0,250` | `P2` / `P3` | `0,500` | `T5` | `0,000` |
+| **3** | `0,250` | `P4` | `0,000` | `T7` | `0,500` |
+| **4** | `0,250` | `P5` / `P6` | `0,500` | `T8` | `0,500` |
+| — | — | `P7` / `P8` | `0,000` | — | — |
+
+![Resultados completos del módulo GSPN Analysis en PIPE](GSPNAnalysis.png)
+
+#### Interpretación del Comportamiento Estacionario
+Los resultados revelan un fenómeno crítico de contención de recursos:
+
+1. Saturación de recursos y paralelismo: Los recursos `P7` y `P8` presentan una ocupación libre promedio de `0,000` (100 % de utilización), mientras que en la plaza de admisión `P1` permanece en promedio `1,000` token esperando disponibilidad de recursos.
+2. Inanición (Starvation) de la rama central sin política de arbitraje: El estado `1` (único estado tangible donde se ejecuta la rama central `P4`) tiene probabilidad estacionaria `0,000`, y el *throughput* de `T5` es nulo (`0,000`). Esto ocurre porque `T4` requiere adquirir `P7` y `P8` simultáneamente; dado que las ramas superior (`T1`–`T3`) e inferior (`T6`–`T8`) operan en paralelo y liberan `P7` y `P8` en instantes asíncronos, el token en espera en `P1` captura inmediatamente el primer recurso que se libera (`T1` o `T6`), impidiendo que ambos queden libres a la vez.
+
+---
+
+### Conexión con la Implementación y Experimentación en Java
+
+* Validación de ejecución: Los tres T-invariantes deducidos definen exactamente las expresiones regulares utilizadas por el validador post-ejecución para auditar los 200 ciclos completados en el archivo de log.
+* Justificación de políticas de planificación: La inanición teórica observada en `T5` bajo el modelo estocástico sin arbitraje fundamenta la necesidad de implementar y contrastar dos políticas de resolución de conflictos en el Monitor de Java, cuyos tiempos reales (determinísticos en milisegundos) y distribución de carga se analizan en las secciones siguientes.
+
+
+
 ---
