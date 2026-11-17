@@ -12,6 +12,8 @@ import java.util.concurrent.locks.Condition;
 import ar.edu.fcefyn.pcp.tp2.api.Politica;
 import ar.edu.fcefyn.pcp.tp2.api.TransitionLogger;
 
+import java.util.Arrays;
+
 public class Monitor implements MonitorInterface {
 
     //atributos
@@ -30,6 +32,8 @@ public class Monitor implements MonitorInterface {
     private final int objetivo;          // cuantas veces tiene que dispararse (200)
     private int disparosFin = 0;           // cuantas veces se disparo hasta ahora
     private boolean finished = false;       // true = el sistema termino
+    private final long[] tiempoMS;              // tiempo minimo de cada transicion 0 = inmediata
+    private final long[] sensibilizadaDesde;    // momento en que cada transicion quedo sensibilizada (-1 = no lo esta)
 
     //constructor
     //el monitor es agnostico solo recibe numeros si cambiamos la red cambiaria la configuracion y el Monitor queda igual
@@ -53,6 +57,13 @@ public class Monitor implements MonitorInterface {
         // la condicion de fin viene de config
         this.transicionFin = config.transicionFinInvariantes();
         this.objetivo = config.objetivoInvariantes();
+
+        // tiempos
+        // actualizarTimestamps usa marcado y pre los caragmos antes
+        this.tiempoMS = config.tiempoMS();
+        this.sensibilizadaDesde = new long[n];
+        Arrays.fill(sensibilizadaDesde, -1);   // al principio ninguna tiene momento anotado
+        actualizarTimestamps();                // anotamos las que arrancan sensibilizadas (T0)
     }
 
 
@@ -61,15 +72,29 @@ public class Monitor implements MonitorInterface {
     public boolean fireTransition(int t) {
         lock.lock();
         try {
-            while (!finished && !estaSensibilizada(t)) { // espera solo si NO termino y NO puede disparar
-                esperando[t]++;
-                colas[t].await();
-                esperando[t]--;
-            }
-            if (finished) {
-                return false;                  // el sistema termino: el hilo tiene que salir
+            while (true) {
+                while (!finished && !estaSensibilizada(t)) { // espera hasta que haya tokens
+                    esperando[t]++;
+                    colas[t].await();
+                    esperando[t]--;
+                }
+                if (finished) {
+                    return false;
+                }
+                long espera = tiempoRestante(t);   // cuanto le falta a t para poder dispararse
+                if (espera <= 0) {
+                    break;                         // ya paso el tiempo o es inmediata: salimos y disparamos
+                }
+                lock.unlock();                     // soltamos el lock para que los demas sigan
+                try {
+                    Thread.sleep(espera);          // dormimos lo que falta
+                } finally {
+                    lock.lock();                   // volvemos a tomar el lock antes de seguir
+                }
+                // vuelve al principio del while(true=
             }
             disparar(t);
+            actualizarTimestamps();                // el disparo cambio el marcado actualizamos los momentos
             verificarInvariantesPlaza();
             logger.logTransition(t);           // dentro del lock: el log queda en el orden real
             if (t == transicionFin) {          // se disparo T9
@@ -146,5 +171,30 @@ public class Monitor implements MonitorInterface {
         for (Condition cola : colas) {
             cola.signalAll();
         }
+    }
+    // actualizarTimestamps
+// para cada transicion: si acaba de quedar sensibilizada anotamos el momento,
+// si dejo de estar sensibilizada lo borramos (-1)
+    private void actualizarTimestamps() {
+        long ahora = System.currentTimeMillis();
+        for (int i = 0; i < sensibilizadaDesde.length; i++) {
+            if (estaSensibilizada(i)) {
+                if (sensibilizadaDesde[i] < 0) {
+                    sensibilizadaDesde[i] = ahora;
+                }
+            } else {
+                sensibilizadaDesde[i] = -1;
+            }
+        }
+    }
+
+    // tiempoRestante
+// cuantos ms le faltan a t para poder dispararse (0 o negativo = ya puede)
+    private long tiempoRestante(int t) {
+        if (tiempoMS[t] == 0) {
+            return 0;                       // transicion inmediata
+        }
+        long transcurrido = System.currentTimeMillis() - sensibilizadaDesde[t];
+        return tiempoMS[t] - transcurrido;
     }
 }
