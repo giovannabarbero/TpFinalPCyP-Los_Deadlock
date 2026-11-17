@@ -2,10 +2,9 @@ package ar.edu.fcefyn.pcp.tp2.app;
 
 import ar.edu.fcefyn.pcp.tp2.api.MonitorInterface;
 import ar.edu.fcefyn.pcp.tp2.api.PetriNetConfig;
-// Clara: Descomentar cuando se suban las clases de política a solution
-// import ar.edu.fcefyn.pcp.tp2.api.Politica;
 // import ar.edu.fcefyn.pcp.tp2.solution.PoliticaAleatoria;
 // import ar.edu.fcefyn.pcp.tp2.solution.PoliticaPriorizada;
+import ar.edu.fcefyn.pcp.tp2.api.Politica;
 import ar.edu.fcefyn.pcp.tp2.solution.FileTransitionLogger;
 import ar.edu.fcefyn.pcp.tp2.solution.Monitor;
 import ar.edu.fcefyn.pcp.tp2.solution.SegmentWorker;
@@ -25,63 +24,57 @@ import java.util.Properties;
 public class Main {
 
     public static final int POLITICA_ALEATORIA = 0;
-    public static final int POLITICA_PRIORIZADA = 1;
+    public static final int POLITICA_PRIORIZADA = 1; // Encoding constants for ease of use
 
     public static void main(String[] args) throws Exception {
         // Relative pathing
-        Path rutaConfig = Path.of("config", "config.properties");
-        Integer politicaPorConsola = (args.length > 0) ? Integer.parseInt(args[0].trim()) : null;
+        Path rutaConfig = Path.of("config", "config.properties"); // config file path loading
+        Integer politicaPorConsola = (args.length > 0) ? Integer.parseInt(args[0].trim()) : null;// override by console code java -jar tp2.jar 0/1 prio
 
-        PetriNetConfig config = cargarConfiguracion(rutaConfig, politicaPorConsola);
+        PetriNetConfig config = cargarConfiguracion(rutaConfig, politicaPorConsola); // load config
         int codigoPolitica = config.tipoPolitica();
         String nombrePolitica = obtenerNombrePolitica(codigoPolitica);
 
-        String timestamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss"));
-        Path rutaLogDisparos = Path.of("resultados", "disparos_" + nombrePolitica + "_" + timestamp + ".log");
-        Path rutaResumen = Path.of("resultados", "resumen_" + nombrePolitica + "_" + timestamp + ".txt");
+        String timestamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss")); // time extract for unique log creation
+        Path rutaLogDisparos = Path.of("resultados", "disparos_" + nombrePolitica + "_" + timestamp + ".log"); // path for firing log
+        Path rutaResumen = Path.of("resultados", "resumen_" + nombrePolitica + "_" + timestamp + ".txt"); // path for final result summary
 
-        FileTransitionLogger logger = new FileTransitionLogger(rutaLogDisparos);
-        List<Thread> hilos = new ArrayList<>(7);
+        FileTransitionLogger logger = new FileTransitionLogger(rutaLogDisparos); // create logger
+        List<Thread> hilos;
         long inicioNs;
         long finNs;
 
         try {
-            // Guille & Clara
-            // 1. ahora compila con el Monitor v1 actual (solo recibe config).
-            // 2. cuando suban sus ramas, comentar la línea de abajo y
-            //    descomentar el bloque de politica + ponitor completo.
-            MonitorInterface monitor = new Monitor(config, null, logger);
-            /*
+            //MonitorInterface monitor = new Monitor(config, null, logger); old
             Politica politica = (codigoPolitica == POLITICA_PRIORIZADA)
                     ? new PoliticaPriorizada(config.pesosPrio())
                     : new PoliticaAleatoria();
-            MonitorInterface monitor = new Monitor(config, politica, logger);
-            */
+            MonitorInterface monitor = new Monitor(config, politica, logger); // dependency inject. Monitor builds itself through its config, its policies, and its logger
 
-            hilos = crearHilosDeSegmentos(monitor);
+            hilos = crearHilosDeSegmentos(monitor); // goto function - thread creation for each Petri net segment
 
             System.out.printf("Iniciando simulación PSP | Política: %d (%s) | Objetivo: %d invariantes | Hilos: %d%n",
                     codigoPolitica, nombrePolitica, config.objetivoInvariantes(), hilos.size());
 
-            inicioNs = System.nanoTime();
+            inicioNs = System.nanoTime(); // high precision time measure start
 
             for (Thread hilo : hilos) {
                 hilo.start();
-            }
+            } // start of each thread
 
-            // Espera a que todos los hilos finalicen ordenadamente (Requerimiento 3)
+            // join all threads for graceful stop
             for (Thread hilo : hilos) {
                 hilo.join();
             }
 
-            finNs = System.nanoTime();
+            finNs = System.nanoTime(); // high precision time measure end
         } finally {
-            logger.close();
+            logger.close(); // BufferedWriter will flush and close log even if something happens
         }
 
-        verificarFinalizacionHilos(hilos);
+        verificarFinalizacionHilos(hilos); // goto function - checks if any thread is alive to alert
 
-        double duracionSegundos = (finNs - inicioNs) / 1_000_000_000.0;
+        double duracionSegundos = (finNs - inicioNs) / 1_000_000_000.0; // calculate runtime
         guardarResumenEjecucion(
                 rutaResumen,
                 codigoPolitica,
@@ -90,7 +83,7 @@ public class Main {
                 duracionSegundos,
                 logger.getTotalDisparos(),
                 rutaLogDisparos
-        );
+        ); // shows on console and saves the summary
     }
 
     private static String obtenerNombrePolitica(int codigoPolitica) {
@@ -101,7 +94,7 @@ public class Main {
                     "Código de política inválido: " + codigoPolitica + ". Valores válidos: 0 (Aleatoria) o 1 (Priorizada)."
             );
         };
-    }
+    } // translates codification to string
 
     /**
      * create 7 threads for 5 exe seg SA..SE)
@@ -110,28 +103,28 @@ public class Main {
     private static List<Thread> crearHilosDeSegmentos(MonitorInterface monitor) {
         List<Thread> hilos = new ArrayList<>(7);
 
-        // Segmento SA (previo al conflicto en P1): 1 hilo para {T0}
-        hilos.add(new Thread(new SegmentWorker("SA", monitor, 0), "Hilo-SA-Admision"));
+        // Segment SA (previous to conflicto in P1): 1 thread for {T0}
+        hilos.add(new Thread(new SegmentWorker("SA", monitor, 0), "Hilo-SA-Admision")); // this thread holds no decision over which flow has to goto next, that is managed by policy
 
-        // Segmento SB (rama tarjeta): 1 hilo para {T1, T2, T3}
+        // Segment SB (branch cards): 1 hilo for {T1, T2, T3}
         hilos.add(new Thread(new SegmentWorker("SB", monitor, 1, 2, 3), "Hilo-SB-Tarjeta"));
 
-        // Segmento SC (rama alto riesgo): 1 hilo para {T4, T5}
+        // Segment SC (branch high risk): 1 thread for {T4, T5}
         hilos.add(new Thread(new SegmentWorker("SC", monitor, 4, 5), "Hilo-SC-AltoRiesgo"));
 
-        // Segmento SD (rama transferencia): 1 hilo para {T6, T7, T8}
+        // Segment SD (branch transfer): 1 thread for {T6, T7, T8}
         hilos.add(new Thread(new SegmentWorker("SD", monitor, 6, 7, 8), "Hilo-SD-Transferencia"));
 
-        // Segmento SE (posterior al join en P9): 3 hilos para {T9} (cota máxima M(P9) = 3)
+        // Segment SE (posterior to join in P9): 3 threads for {T9} (máx amount M(P9) = 3)
         for (int i = 1; i <= 3; i++) {
-            hilos.add(new Thread(new SegmentWorker("SE-" + i, monitor, 9), "Hilo-SE-Liquidacion-" + i));
+            hilos.add(new Thread(new SegmentWorker("SE-" + i, monitor, 9), "Hilo-SE-Liquidacion-" + i)); // as the inicial marks are 3, then 3 transactions can be ready to liquidate in P9 at the same time, 3 threads allows for parallel liquidation
         }
 
         return hilos;
     }
 
     private static void verificarFinalizacionHilos(List<Thread> hilos) {
-        long hilosVivos = hilos.stream().filter(Thread::isAlive).count();
+        long hilosVivos = hilos.stream().filter(Thread::isAlive).count(); // check if any threads are left alive
         if (hilosVivos > 0) {
             throw new IllegalStateException("Error: quedaron " + hilosVivos + " hilos activos al terminar la ejecución.");
         }
@@ -160,17 +153,17 @@ public class Main {
         String resumen = sb.toString();
         System.out.println(resumen);
         Files.writeString(rutaResumen, resumen, StandardCharsets.UTF_8);
-    }
+    } // creates summary file structure
 
     private static PetriNetConfig cargarConfiguracion(Path ruta, Integer politicaOverride) throws IOException {
         Properties props = new Properties();
-        try (InputStream is = Files.newInputStream(ruta)) {
+        try (InputStream is = Files.newInputStream(ruta)) { // imput stream makes a byte flow
             props.load(is);
-        }
+        } // load properties file
 
         int numPlazas = Integer.parseInt(props.getProperty("red.plazas", "10").trim());
         int numTransiciones = Integer.parseInt(props.getProperty("red.transiciones", "10").trim());
-
+        // parse makes csv into java primitives
         int[][] matrixPre = new int[numPlazas][numTransiciones];
         int[][] matrixIncidencia = new int[numPlazas][numTransiciones];
         for (int i = 0; i < numPlazas; i++) {
@@ -209,7 +202,7 @@ public class Main {
                 transicionFinInvariantes,
                 objetivoInvariantes,
                 tipoPolitica
-        );
+        ); // packing inmutable record
     }
 
     private static int[] parsearArrayInt(String csv) {

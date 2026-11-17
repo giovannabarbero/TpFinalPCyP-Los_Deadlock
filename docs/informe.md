@@ -1,4 +1,3 @@
-Parte Thomas <- Borrar al final
 ---
 # Arquitectura de Hilos
 
@@ -122,7 +121,7 @@ Poseemos un `FileTransitionLogger` que cumple el rol de *Output Queue* para cont
 
 ![GraficoResponsabilidadesHilos](Grafico_Responsabilidades_de_Hilo.png)
 
-*Imagen n : Grafico de Hilos en Red de Petri*
+*Imagen 1 : Grafico de Hilos en Red de Petri*
 
 # Análisis de la Red de Petri en PIPE
 
