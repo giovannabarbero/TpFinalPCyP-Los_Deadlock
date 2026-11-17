@@ -39,7 +39,9 @@ public class Monitor implements MonitorInterface {
     private final long[] sensibilizadaDesde;    // momento en que cada transicion quedo sensibilizada (-1 = no lo esta)
     private final int[] grupoDe;                                // a que grupo de conflicto pertenece cada transicion (-1 = ninguno)
     private final List<List<Integer>> grupos = new ArrayList<>(); // cada grupo es una lista de transiciones en conflicto
-    private final int[] elegida;                                // que transicion eligio la politica en cada grupo (-1 = todavia no eligio)
+    private final int[] elegida;    // que transicion eligio la politica en cada grupo (-1 = todavia no eligio)
+    private final boolean[] esInicio;   // transiciones que meten una transaccion nueva (T0)
+    private int disparosInicio = 0;     // cuantas transacciones entraron
 
     //constructor
     //el monitor es agnostico solo recibe numeros si cambiamos la red cambiaria la configuracion y el Monitor queda igual
@@ -63,6 +65,19 @@ public class Monitor implements MonitorInterface {
         // la condicion de fin viene de config
         this.transicionFin = config.transicionFinInvariantes();
         this.objetivo = config.objetivoInvariantes();
+
+        // detectamos la transicion de entrada: la que saca tokens de la plaza
+// donde la transicion de fin (T9) devuelve el token (P0)
+        this.esInicio = new boolean[n];
+        for (int p = 0; p < pre.length; p++) {
+            if (incidencia[p][transicionFin] > 0) {     // plaza donde T9 deja el token (P0)
+                for (int i = 0; i < n; i++) {
+                    if (pre[p][i] > 0) {
+                        esInicio[i] = true;              // la que saca de esa plaza (T0)
+                    }
+                }
+            }
+        }
 
         // tiempos
         // actualizarTimestamps usa marcado y pre los caragmos antes
@@ -107,6 +122,9 @@ public class Monitor implements MonitorInterface {
                 // vuelve al principio del while(true=
             }
             disparar(t);
+            if (esInicio[t]) {
+                disparosInicio++;
+            }
             actualizarTimestamps();                // el disparo cambio el marcado actualizamos los momentos
 
             if (grupoDe[t] >= 0) {
@@ -251,6 +269,10 @@ public class Monitor implements MonitorInterface {
     // puedeDisparar
 // estaSensibilizada + la politica: si t esta en conflicto, solo puede disparar si la politica la eligio
     private boolean puedeDisparar(int t) {
+
+        if (esInicio[t] && disparosInicio >= objetivo) {
+            return false;   // ya entraron 200 transacciones: no se admiten mas
+        }
         if (!estaSensibilizada(t)) {
             return false;                      // sin tokens no hay nada que decidir
         }

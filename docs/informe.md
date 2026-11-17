@@ -234,3 +234,166 @@ Los resultados revelan un fenómeno crítico de contención de recursos:
 
 
 ---
+Parte Guillermina <- Borrar al final
+---
+# Monitor de Concurrencia
+
+El monitor es el componente central del sistema: coordina el acceso de los hilos a la red de Petri, de forma que en cada instante como máximo un hilo modifica su estado. No ejecuta las acciones del sistema; solo decide qué transición puede dispararse y cuándo.
+
+### Diseño general
+
+La clase `Monitor` implementa `MonitorInterface` y expone un único método público:
+
+    boolean fireTransition(int transition)
+
+Cada hilo llama a este método con la transición que quiere disparar. El método devuelve `true` si el disparo se realizó, o `false` cuando el sistema terminó y el hilo debe finalizar.
+
+El monitor es **agnóstico a la red**: no contiene ninguna referencia a transiciones o plazas puntuales. Todo lo que depende de la red le llega por el constructor a través de `PetriNetConfig`:
+
+- Matriz Pre $I^-$ y matriz de incidencia $I$
+- Marcado inicial $M_0$
+- Tiempos de cada transición
+- Invariantes de plaza y sus constantes
+- Transición de fin y cantidad objetivo de invariantes
+
+Lo que el monitor necesita saber de la estructura (qué transiciones están en conflicto y cuál es la transición de entrada) lo calcula a partir de las matrices. De esta forma, cambiando la red en el archivo de configuración, la clase `Monitor` no sufre ningún cambio.
+
+### Exclusión mutua
+
+La exclusión mutua se implementa con un `ReentrantLock` creado en modo justo (`new ReentrantLock(true)`), de forma que los hilos acceden al monitor en el orden en que lo solicitaron. Todo el cuerpo de `fireTransition` se ejecuta entre `lock()` y `unlock()`, y el `unlock()` se encuentra en un bloque `finally`, lo que garantiza que el lock se libere aunque ocurra una excepción.
+
+Dentro de la sección crítica, el monitor evalúa si la transición está sensibilizada comparando el marcado actual con la matriz Pre:
+
+$$t \text{ sensibilizada} \iff M(p) \geq I^-(p, t) \quad \forall p$$
+
+y, si corresponde, dispara aplicando la ecuación de estado:
+
+$$M_{j+1} = M_j + I \cdot \sigma$$
+
+donde $\sigma$ es el vector de disparo con un 1 en la posición de $t$. En la práctica esto equivale a sumarle al marcado la columna $t$ de la matriz de incidencia.
+
+Se usa la matriz Pre para la sensibilización (y no el signo del próximo estado) porque es la definición formal: si una transición consumiera y devolviera un token de la misma plaza, la incidencia valdría 0 y no reflejaría que ese token es necesario.
+
+Como el marcado solo se lee y modifica dentro del lock, ningún par de hilos puede observar ni producir un estado intermedio inconsistente.
+
+### Colas de condición y bloqueo de hilos
+
+Cuando un hilo solicita disparar una transición que no puede dispararse, no debe abandonar el monitor ni hacer espera activa: debe bloquearse hasta que el estado de la red cambie. Para esto el monitor mantiene **una cola de condición por transición**, creada a partir del mismo lock:
+
+    colas[i] = lock.newCondition();
+
+junto con un vector `esperando[i]` que cuenta cuántos hilos están bloqueados en cada cola (la interfaz `Condition` no expone esa información).
+
+El protocolo dentro de `fireTransition(t)` es:
+
+1. Mientras $t$ no pueda dispararse, el hilo incrementa `esperando[t]` y ejecuta `colas[t].await()`. Al hacer `await()` el hilo **libera el lock** y queda suspendido; esto permite que otros hilos entren al monitor y modifiquen el marcado. Al ser despertado, el hilo vuelve a adquirir el lock antes de continuar y decrementa `esperando[t]`.
+2. La condición se evalúa con un `while` y no con un `if`. Entre que un hilo es despertado y vuelve a adquirir el lock, otro hilo pudo haber disparado y consumido los tokens; con el `while` el hilo vuelve a verificar la condición y, si ya no se cumple, se bloquea nuevamente.
+3. Luego de cada disparo, el monitor recorre las colas y, para cada transición $i$ con `esperando[i] > 0` que ahora puede dispararse, ejecuta `colas[i].signal()`, despertando a **un** hilo de esa cola.
+
+Se usa `signal()` y no `signalAll()` para evitar despertar hilos que no podrán disparar. Cuando varios hilos esperan la misma transición (por ejemplo, los tres hilos de $T_9$), el hilo despertado dispara y, al terminar, vuelve a recorrer las colas, despertando al siguiente si todavía hay tokens: los despertares se encadenan.
+
+Este esquema evita la espera activa (los hilos bloqueados no consumen CPU) y garantiza que ningún hilo quede bloqueado indefinidamente mientras su transición esté en condiciones de dispararse, ya que cada disparo revisa todas las colas.
+
+### Semántica temporal
+
+Las transiciones $T_2, T_3, T_5, T_7$ y $T_8$ son temporales. Se implementó una semántica de **tiempo mínimo**: cada transición temporal tiene un tiempo $\alpha$ (en milisegundos, definido en `config.properties`) y no puede dispararse hasta que hayan transcurrido al menos $\alpha$ ms desde que quedó sensibilizada. Su intervalo de disparo es entonces $[\alpha, \infty)$. Las transiciones inmediatas tienen $\alpha = 0$ y se disparan apenas se sensibilizan.
+
+|Transición|$\alpha$ (ms)|
+|---|---|
+|$T_2$|85|
+|$T_3$|85|
+|$T_5$|210|
+|$T_7$|95|
+|$T_8$|95|
+
+Para implementarla, el monitor guarda en un vector `sensibilizadaDesde[i]` el instante en que cada transición quedó sensibilizada (o $-1$ si no lo está). Después de cada disparo, el monitor recorre todas las transiciones: a las que acaban de quedar sensibilizadas les registra el instante actual, y a las que dejaron de estarlo les borra el registro. Si una transición sigue sensibilizada, su instante no se reinicia.
+
+Cuando un hilo ya pasó la espera por tokens, el monitor calcula el tiempo restante:
+
+$$t_{restante} = \alpha_t - (t_{actual} - t_{sensibilizada})$$
+
+Si $t_{restante} > 0$, el hilo:
+
+1. libera el lock,
+2. duerme `Thread.sleep(t_restante)`,
+3. vuelve a adquirir el lock,
+4. y **vuelve a evaluar todo desde el principio**: si la transición sigue sensibilizada, si el sistema terminó, y si ya cumplió su tiempo.
+
+Liberar el lock durante la espera es lo que mantiene el paralelismo real: mientras una transacción espera la respuesta del issuer o el scoring del antifraude, los demás hilos siguen disparando. Si el hilo durmiera con el lock tomado, toda la ejecución quedaría serializada.
+
+La reevaluación después de dormir es necesaria porque, mientras el hilo dormía, otros hilos pudieron modificar el marcado o el sistema pudo haber finalizado.
+
+La readquisición del lock se hace en un bloque `finally`, de modo que aun si el `sleep` es interrumpido el hilo vuelve a tener el lock y el `finally` exterior de `fireTransition` lo libera correctamente. Así, las llamadas a `lock()` y `unlock()` siempre quedan balanceadas.
+
+### Resolución de conflictos
+
+#### Detección de conflictos
+
+Dos transiciones están en conflicto estructural cuando comparten una plaza de entrada: si se dispara una, puede deshabilitar a la otra. El monitor detecta los conflictos en el constructor, a partir de la matriz Pre: para cada plaza busca las transiciones que consumen tokens de ella ($I^-(p, t) > 0$), y si son dos o más las agrupa. Los grupos que se solapan se unen.
+
+En nuestra red:
+
+- $P_1$ tiene como salidas a $T_1, T_4, T_6$
+- $P_7$ tiene como salidas a $T_1, T_4$
+- $P_8$ tiene como salidas a $T_4, T_6$
+
+por lo que resulta un único grupo de conflicto $\{T_1, T_4, T_6\}$. Como el grupo se calcula a partir de la matriz, el monitor no contiene ninguna referencia a estas transiciones.
+
+#### El problema: inanición de $T_4$
+
+$T_4$ es la única transición que requiere los dos recursos ($P_7$ y $P_8$) simultáneamente. Las ramas de tarjeta y transferencia ocupan un recurso cada una y los liberan en instantes distintos. Cada vez que uno se libera, casi siempre hay un token esperando en $P_1$, por lo que $T_1$ o $T_6$ lo toman de inmediato. En consecuencia, $P_7$ y $P_8$ prácticamente nunca están libres a la vez y $T_4$ no llega a sensibilizarse: **sufre inanición**.
+
+Esto coincide con el análisis GSPN de PIPE (throughput de $T_5$ igual a 0) y con la ejecución en Java sin política, donde en 200 invariantes no se completó ninguno de alto riesgo.
+
+Por este motivo, una política que solo elija entre las transiciones sensibilizadas no resuelve el problema: $T_4$ casi nunca es candidata.
+
+#### Solución: elegir y esperar
+
+Cuando una transición de un grupo de conflicto podría dispararse, el monitor le consulta a la política **una única vez** cuál de las transiciones del grupo debe dispararse, y guarda la elección. A partir de ahí:
+
+1. Una transición del grupo solo puede dispararse si está sensibilizada **y** es la elegida.
+2. Si la elegida no está sensibilizada (por ejemplo, $T_4$ con algún recurso ocupado), el token permanece en $P_1$ y las demás transiciones del grupo esperan aunque estén sensibilizadas.
+3. Cuando la elegida se dispara, la elección se borra y, para el próximo token, se vuelve a consultar a la política.
+
+La política recibe la lista de transiciones del grupo y devuelve una de ellas mediante un sorteo con pesos:
+
+- **Política aleatoria:** pesos iguales para $T_1, T_4, T_6$; cada transacción tiene la misma probabilidad de ir a cada flujo.
+- **Política priorizada:** mayor peso para $T_4$ (flujo de alto riesgo), configurado en `politica.pesos`.
+
+De esta forma la distribución de carga la determina la política y no la estructura de la red, lo que permite demostrar su cumplimiento con los resultados de las ejecuciones.
+
+### Verificación de invariantes de plaza
+
+Después de cada disparo, y todavía dentro de la sección crítica, el monitor verifica que se cumplan los invariantes de plaza. Cada invariante está representado en la configuración como un vector de coeficientes $v_i$ (con un 1 en las plazas que participan) y una constante $k_i$. El monitor calcula:
+
+$$v_i \cdot M = \sum_{p} v_i(p) \cdot M(p)$$
+
+y lo compara con $k_i$. Si alguna suma difiere de su constante, se lanza una `IllegalStateException` que indica qué invariante se violó, con el valor obtenido y el esperado.
+
+Para nuestra red se verifican:
+
+- $M(P_0) + M(P_1) + M(P_2) + M(P_3) + M(P_4) + M(P_5) + M(P_6) + M(P_9) = 3$
+- $M(P_2) + M(P_3) + M(P_4) + M(P_7) = 1$
+- $M(P_4) + M(P_5) + M(P_6) + M(P_8) = 1$
+
+La verificación se hace dentro del lock porque lee el marcado: si se hiciera afuera, otro hilo podría disparar a mitad de la suma y el resultado no correspondería a ningún estado real. Además, como los invariantes provienen de la configuración, la verificación también es independiente de la red.
+
+### Registro de disparos
+
+Inmediatamente después de cada disparo, el monitor invoca `logger.logTransition(t)` dentro de la sección crítica. Esto garantiza que el orden de las transiciones en el archivo de log coincida exactamente con el orden real de los disparos, condición necesaria para la verificación posterior de los invariantes de transición mediante expresiones regulares.
+
+### Finalización del sistema
+
+El programa debe terminar al completarse 200 invariantes de transición, sin dejar hilos activos. Para esto el monitor utiliza dos datos de la configuración: la transición de fin ($T_9$, que cierra todo invariante) y la cantidad objetivo (200).
+
+**Límite de entradas.** El monitor identifica la transición de entrada a partir de las matrices: es la que consume tokens de la plaza a la que la transición de fin devuelve el token (en nuestra red, $T_0$, que consume de $P_0$). Esa transición puede dispararse como máximo 200 veces. De esta forma, al alcanzar el objetivo no quedan transacciones a medio procesar y el log contiene exactamente 200 invariantes completos, sin transiciones residuales.
+
+**Apagado.** El monitor cuenta los disparos de la transición de fin. Cuando ese contador alcanza el objetivo:
+
+1. marca `finished = true`,
+2. ejecuta `signalAll()` sobre todas las colas de condición, despertando a todos los hilos bloqueados,
+3. a partir de ese momento, cualquier llamada a `fireTransition` (de hilos que estaban esperando o que llegan después) devuelve `false` sin disparar.
+
+Cada hilo (`SegmentWorker`) finaliza su ciclo al recibir `false`, y el `Main` espera a todos con `join()`.
+
+La condición de espera de los hilos incluye `!finished`, por lo que un hilo despertado por el `signalAll()` sale del bucle de espera aunque su transición no esté sensibilizada. La variable `finished` no se declara `volatile` porque solo se lee y se escribe dentro del lock, que ya garantiza su visibilidad entre hilos.
