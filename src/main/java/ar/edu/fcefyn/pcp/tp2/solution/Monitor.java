@@ -14,6 +14,9 @@ import ar.edu.fcefyn.pcp.tp2.api.TransitionLogger;
 
 import java.util.Arrays;
 
+import java.util.ArrayList;
+import java.util.List;
+
 public class Monitor implements MonitorInterface {
 
     //atributos
@@ -34,6 +37,9 @@ public class Monitor implements MonitorInterface {
     private boolean finished = false;       // true = el sistema termino
     private final long[] tiempoMS;              // tiempo minimo de cada transicion 0 = inmediata
     private final long[] sensibilizadaDesde;    // momento en que cada transicion quedo sensibilizada (-1 = no lo esta)
+    private final int[] grupoDe;                                // a que grupo de conflicto pertenece cada transicion (-1 = ninguno)
+    private final List<List<Integer>> grupos = new ArrayList<>(); // cada grupo es una lista de transiciones en conflicto
+    private final int[] elegida;                                // que transicion eligio la politica en cada grupo (-1 = todavia no eligio)
 
     //constructor
     //el monitor es agnostico solo recibe numeros si cambiamos la red cambiaria la configuracion y el Monitor queda igual
@@ -63,7 +69,14 @@ public class Monitor implements MonitorInterface {
         this.tiempoMS = config.tiempoMS();
         this.sensibilizadaDesde = new long[n];
         Arrays.fill(sensibilizadaDesde, -1);   // al principio ninguna tiene momento anotado
-        actualizarTimestamps();                // anotamos las que arrancan sensibilizadas (T0)
+        actualizarTimestamps(); // anotamos las que arrancan sensibilizadas (T0)
+
+        // conflictos: los detectamos mirando la matriz Pre
+        this.grupoDe = new int[n];
+        Arrays.fill(grupoDe, -1);
+        armarGruposDeConflicto(n);
+        this.elegida = new int[grupos.size()];
+        Arrays.fill(elegida, -1);
     }
 
 
@@ -73,7 +86,7 @@ public class Monitor implements MonitorInterface {
         lock.lock();
         try {
             while (true) {
-                while (!finished && !estaSensibilizada(t)) { // espera hasta que haya tokens
+                while (!finished && !puedeDisparar(t)) {   // espera hasta que haya tokens
                     esperando[t]++;
                     colas[t].await();
                     esperando[t]--;
@@ -95,6 +108,11 @@ public class Monitor implements MonitorInterface {
             }
             disparar(t);
             actualizarTimestamps();                // el disparo cambio el marcado actualizamos los momentos
+
+            if (grupoDe[t] >= 0) {
+                elegida[grupoDe[t]] = -1;   // se disparo la elegida: la proxima vez se vuelve a preguntar
+            }
+
             verificarInvariantesPlaza();
             logger.logTransition(t);           // dentro del lock: el log queda en el orden real
             if (t == transicionFin) {          // se disparo T9
@@ -141,7 +159,7 @@ public class Monitor implements MonitorInterface {
     // y tiene hilos esperando despierta a uno
     private void despertarSensibilizadas() {
         for (int i = 0; i < esperando.length; i++) {
-            if (esperando[i] > 0 && estaSensibilizada(i)) {
+            if (esperando[i] > 0 && puedeDisparar(i)) {
                 colas[i].signal();   // despierta a un solo hilo de la sala despues al siguiente es una cadena
             }
         }
@@ -196,5 +214,53 @@ public class Monitor implements MonitorInterface {
         }
         long transcurrido = System.currentTimeMillis() - sensibilizadaDesde[t];
         return tiempoMS[t] - transcurrido;
+    }
+    // armarGruposDeConflicto
+// para cada plaza, busca que transiciones sacan tokens de ella
+// si son 2 o mas, estan en conflicto y las juntamos en un grupo
+    private void armarGruposDeConflicto(int n) {
+        for (int p = 0; p < pre.length; p++) {
+            List<Integer> salidas = new ArrayList<>();
+            for (int t = 0; t < n; t++) {
+                if (pre[p][t] > 0) {
+                    salidas.add(t);
+                }
+            }
+            if (salidas.size() < 2) {
+                continue;                      // una sola salida: no hay conflicto en esta plaza
+            }
+            int g = -1;
+            for (int t : salidas) {
+                if (grupoDe[t] >= 0) {
+                    g = grupoDe[t];            // alguna ya tiene grupo: usamos ese
+                }
+            }
+            if (g < 0) {
+                g = grupos.size();             // ninguna tiene grupo: creamos uno nuevo
+                grupos.add(new ArrayList<>());
+            }
+            for (int t : salidas) {
+                if (grupoDe[t] < 0) {
+                    grupoDe[t] = g;
+                    grupos.get(g).add(t);
+                }
+            }
+        }
+    }
+
+    // puedeDisparar
+// estaSensibilizada + la politica: si t esta en conflicto, solo puede disparar si la politica la eligio
+    private boolean puedeDisparar(int t) {
+        if (!estaSensibilizada(t)) {
+            return false;                      // sin tokens no hay nada que decidir
+        }
+        int g = grupoDe[t];
+        if (g < 0 || politica == null) {
+            return true;                       // no esta en conflicto (o no hay politica): puede disparar
+        }
+        if (elegida[g] < 0) {
+            elegida[g] = politica.seleccionar(grupos.get(g));   // preguntamos UNA vez
+        }
+        return elegida[g] == t;                // solo dispara si es la elegida
     }
 }
