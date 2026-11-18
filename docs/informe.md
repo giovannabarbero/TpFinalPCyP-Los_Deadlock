@@ -396,3 +396,88 @@ El programa debe terminar al completarse 200 invariantes de transición, sin dej
 Cada hilo (`SegmentWorker`) finaliza su ciclo al recibir `false`, y el `Main` espera a todos con `join()`.
 
 La condición de espera de los hilos incluye `!finished`, por lo que un hilo despertado por el `signalAll()` sale del bucle de espera aunque su transición no esté sensibilizada. La variable `finished` no se declara `volatile` porque solo se lee y se escribe dentro del lock, que ya garantiza su visibilidad entre hilos.
+
+
+## Análisis Temporal: Modelo Analítico vs. Ejecución Práctica
+
+Con el objetivo de garantizar que la simulación de 200 invariantes completos se ejecute dentro de la ventana exigida de 20 a 40 segundos, se formuló un modelo analítico de cota inferior basado en la ocupación de los recursos compartidos (`P7` y `P8`) y se calibraron los retardos de las transiciones temporizadas en `config/config.properties`.
+
+---
+
+### Semántica Temporal y Duración por Flujo (T-Invariante)
+
+Bajo la semántica temporal de la red, cada transición temporizada tiene asociado un retardo mínimo $\alpha$ (intervalo $[\alpha, \infty)$), de modo que solo puede dispararse una vez transcurridos al menos $\alpha\text{ ms}$ desde el instante en que quedó sensibilizada. Las transiciones inmediatas (`T0`, `T1`, `T4`, `T6`, `T9`) aportan un retardo nulo ($0\text{ ms}$).
+
+Para la Configuración Base establecida en `config.properties` (`red.tiempos.ms=0,0,85,85,0,210,0,95,95,0`), cada flujo retiene su(s) recurso(s) compartido(s) durante el siguiente tiempo de servicio:
+
+| T-Invariante (Flujo) | Secuencia de Disparos | Recurso(s) Ocupado(s)      | Transiciones Temporizadas | Duración Total por Ciclo ($D_i$) |
+| :--- | :--- |:---------------------------| :--- | :---: |
+| **IT1 — Tarjeta** | $T_0 \rightarrow T_1 \rightarrow T_2 \rightarrow T_3 \rightarrow T_9$ | `P7` (Gateway de tarjetas) | $t_2 = 85\text{ ms},\; t_3 = 85\text{ ms}$ | $D_1 = 85 + 85 = \mathbf{170\text{ ms}}$ |
+| **IT2 — Alto riesgo** | $T_0 \rightarrow T_4 \rightarrow T_5 \rightarrow T_9$ | `P7` y `P8` en simultáneo  | $t_5 = 210\text{ ms}$ | $D_2 = \mathbf{210\text{ ms}}$ |
+| **IT3 — Transferencia** | $T_0 \rightarrow T_6 \rightarrow T_7 \rightarrow T_8 \rightarrow T_9$ | `P8` (Motor antifraude)    | $t_7 = 95\text{ ms},\; t_8 = 95\text{ ms}$ | $D_3 = 95 + 95 = \mathbf{190\text{ ms}}$ |
+
+---
+
+### Deducción de la Fórmula Analítica de Tiempo Teórico
+
+A partir de los P-invariantes de exclusión mutua ($M(P_7) + M(P_2) + M(P_3) + M(P_4) = 1$ y $M(P_8) + M(P_4) + M(P_5) + M(P_6) = 1$), cada recurso compartido puede atender como máximo una transacción a la vez:
+
+1. Paralelismo entre ramas laterales: Dado que Tarjeta (`IT1`) utiliza exclusivamente `P7` y Transferencia (`IT3`) utiliza exclusivamente `P8`, ambas ramas pueden ejecutarse de forma concurrente sin bloquearse entre sí. El tiempo mínimo requerido para completar $N_1$ ciclos de Tarjeta y $N_6$ ciclos de Transferencia está determinado por el recurso más exigido:
+   $$T_{\text{paralelo}} = \max\Big(N_1 \cdot D_1,\; N_6 \cdot D_3\Big)$$
+
+2. Serialización por rama central: Cada vez que se ejecuta una transacción de Alto riesgo (`IT2`), la transición `T4` toma ambos recursos (`P7` y `P8`) en simultáneo y los retiene durante todo el servicio de `T5` ($D_2$). Esto detiene el paralelismo entre las ramas laterales, sumando un tiempo estrictamente secuencial de $N_4 \cdot D_2$.
+
+Combinando ambos componentes para una ejecución total de $N_1 + N_4 + N_6 = 200$ invariantes, la cota inferior analítica del tiempo de ejecución viene dada por:
+
+$$T_{\text{teórico}} = N_4 \cdot D_2 + \max\Big(N_1 \cdot D_1,\; N_6 \cdot D_3\Big)$$
+
+Reemplazando con los retardos de la configuración base:
+
+$$T_{\text{teórico}} = N_4 \cdot 210\text{ ms} + \max\Big(N_1 \cdot 170\text{ ms},\; N_6 \cdot 190\text{ ms}\Big)$$
+
+---
+
+### Cálculo Teórico por Política (Configuración Base)
+
+Dado que el Monitor resuelve el conflicto en `P1` sorteando la transición ganadora (`T1`, `T4` o `T6`) según los pesos configurados y reteniendo el token hasta que sus recursos queden disponibles, la distribución esperada de disparos $(N_1, N_4, N_6)$ queda determinada directamente por las probabilidades de selección de cada política:
+
+#### 1. Política Aleatoria — Pesos $(1, 1, 1)$
+Cada rama posee igual probabilidad de selección ($P(T_1) = P(T_4) = P(T_6) = \frac{1}{3}$). Para $200$ transacciones, el valor esperado de ejecuciones por flujo es $N_1 = N_4 = N_6 = \frac{200}{3} \approx 66,67$:
+
+$$T_{\text{teórico (aleatoria)}} = \frac{200}{3} \cdot 210\text{ ms} + \max\left(\frac{200}{3} \cdot 170\text{ ms},\; \frac{200}{3} \cdot 190\text{ ms}\right)$$
+
+$$T_{\text{teórico (aleatoria)}} = 14\,000\text{ ms} + 12\,666,67\text{ ms} = 26\,666,67\text{ ms} \approx \mathbf{26,67\text{ s}}$$
+
+#### 2. Política Priorizada — Pesos $(1, 3, 1)$
+Asignando peso $3$ a la transición `T4` (`politica.pesos=1,1,1,1,3,1,1,1,1,1`), la suma de pesos del grupo de conflicto es $1 + 3 + 1 = 5$, lo que establece las siguientes probabilidades teóricas:
+* **Tarjeta (`T1`):** $P(T_1) = \frac{1}{5} = 20\,\% \implies N_1 = 40$
+* **Alto riesgo (`T4`):** $P(T_4) = \frac{3}{5} = 60\,\% \implies N_4 = 120$
+* **Transferencia (`T6`):** $P(T_6) = \frac{1}{5} = 20\,\% \implies N_6 = 40$
+
+Sustituyendo en la ecuación analítica:
+
+$$T_{\text{teórico (priorizada)}} = 120 \cdot 210\text{ ms} + \max\Big(40 \cdot 170\text{ ms},\; 40 \cdot 190\text{ ms}\Big)$$
+
+$$T_{\text{teórico (priorizada)}} = 25\,200\text{ ms} + 7\,600\text{ ms} = 32\,800\text{ ms} = \mathbf{32,80\text{ s}}$$
+
+#### 3. Justificación de Calibración de Pesos y Arbitraje
+* Sin política / sorteo solo entre sensibilizadas: La rama central sufre inanición ($N_1 \approx 100,\; N_4 \approx 0,\; N_6 \approx 100$), resultando en $T_{\text{teórico}} = 100 \times 190\text{ ms} = \mathbf{19,00\text{ s}}$, por debajo del mínimo exigido de $20\text{ s}$.
+* Peso excesivo en `T4` (ej. peso $100$): Concentra casi la totalidad de las transacciones en la rama central ($N_4 \approx 200$), elevando el tiempo teórico a $200 \times 210\text{ ms} = \mathbf{42,00\text{ s}}$, por encima del límite superior de $40\text{ s}$.
+* Conclusión analítica base: Con pesos $(1, 3, 1)$, la política priorizada incrementa el tiempo teórico en $+6,13\text{ s}$ ($+23,0\,\%$) respecto de la aleatoria ($32,80\text{ s}$ frente a $26,67\text{ s}$), evidenciando el costo de perder paralelismo al priorizar un flujo que requiere ambos recursos simultáneamente.
+
+---
+
+### Escenarios de Variación Temporal y Contraste Práctico
+
+Para analizar la sensibilidad del sistema frente a distintos perfiles de carga de trabajo, se evaluaron tres escenarios de retardos en `config.properties` manteniendo los pesos $(1, 1, 1)$ y $(1, 3, 1)$:
+
+| Escenario | Configuración `red.tiempos.ms` | Duración por Flujo ($D_1 / D_2 / D_3$) | Política | $T_{\text{teórico}}$ (*a priori*) | $T_{\text{ideal corrida}}$ (con $N_i$ reales) | $T_{\text{práctico}}$ (medido en Java) | Diferencia / *Overhead* |
+| :--- | :--- | :---: | :--- | :---: | :---: | :---: | :---: |
+| **1. Base** | `0,0,85,85,0,210,0,95,95,0` | $170 / 210 / 190\text{ ms}$ | Aleatoria<br>Priorizada | **$26,67\text{ s}$**<br>**$32,80\text{ s}$** | *Completar*<br>*Completar* | *Completar*<br>*Completar* | *Completar*<br>*Completar* |
+| **2. Alto riesgo pesado ($\uparrow T_5$)** | `0,0,75,75,0,240,0,85,85,0` | $150 / 240 / 170\text{ ms}$ | Aleatoria<br>Priorizada | **$27,33\text{ s}$**<br>**$35,60\text{ s}$** | *Completar*<br>*Completar* | *Completar*<br>*Completar* | *Completar*<br>*Completar* |
+| **3. Laterales pesadas ($\uparrow T_{2,3,7,8}$)** | `0,0,120,120,0,140,0,130,130,0` | $240 / 140 / 260\text{ ms}$ | Aleatoria<br>Priorizada | **$26,67\text{ s}$**<br>**$27,20\text{ s}$** | *Completar*<br>*Completar* | *Completar*<br>*Completar* | *Completar*<br>*Completar* |
+
+#### Interpretación de las Desviaciones entre Tiempo Teórico y Práctico
+1. Tiempo muerto por sincronización de dos recursos (`P7` y `P8`): La fórmula analítica asume que `T5` comienza inmediatamente al finalizar el ciclo previo. En la ejecución concurrente real, cuando la política selecciona `T4`, el hilo debe aguardar a que ambos recursos se liberen; si `P7` queda libre antes que `P8`, permanece ocioso hasta que finalice la transacción en curso en `P8`, sumando tiempos muertos no contemplados en la cota inferior.
+2. Impacto asimétrico de los retardos: Al incrementar $T_5$ (Escenario 2), la penalización recae principalmente sobre la política priorizada ($35,60\text{ s}$), ya que el $60\,\%$ de las transacciones se ejecutan de forma serializada. En cambio, al incrementar las ramas laterales (Escenario 3), el mayor paralelismo de la política aleatoria absorbe parte del aumento, igualando prácticamente ambos tiempos teóricos ($26,67\text{ s}$ vs. $27,20\text{ s}$).
+3. Sobrecarga operativa (Overhead) del entorno Java: El tiempo real medido incluye la contención por el `ReentrantLock` justo del monitor, el cambio de contexto entre los 7 hilos trabajadores, la precisión del planificador del sistema operativo en `Thread.sleep()` y la escritura sincronizada en disco del archivo de log.
