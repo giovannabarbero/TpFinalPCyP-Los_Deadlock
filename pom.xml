@@ -44,7 +44,7 @@
                 <configuration>
                     <archive>
                         <manifest>
-                            <mainClass>ar.edu.unc.fcefyn.pcp.tp2.app.Main</mainClass>
+                            <mainClass>ar.edu.fcefyn.pcp.tp2.app.Main</mainClass>
                         </manifest>
                     </archive>
                 </configuration>
