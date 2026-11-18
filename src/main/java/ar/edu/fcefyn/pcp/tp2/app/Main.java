@@ -161,6 +161,7 @@ public class Main {
             props.load(is);
         } // load properties file
 
+
         int numPlazas = Integer.parseInt(props.getProperty("red.plazas", "10").trim());
         int numTransiciones = Integer.parseInt(props.getProperty("red.transiciones", "10").trim());
         // parse makes csv into java primitives
