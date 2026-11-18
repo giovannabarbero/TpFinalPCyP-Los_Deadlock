@@ -2,8 +2,8 @@ package ar.edu.fcefyn.pcp.tp2.app;
 
 import ar.edu.fcefyn.pcp.tp2.api.MonitorInterface;
 import ar.edu.fcefyn.pcp.tp2.api.PetriNetConfig;
-// import ar.edu.fcefyn.pcp.tp2.solution.PoliticaAleatoria;
-// import ar.edu.fcefyn.pcp.tp2.solution.PoliticaPriorizada;
+import ar.edu.fcefyn.pcp.tp2.solution.PoliticaAleatoria;
+ import ar.edu.fcefyn.pcp.tp2.solution.PoliticaPriorizada;
 import ar.edu.fcefyn.pcp.tp2.api.Politica;
 import ar.edu.fcefyn.pcp.tp2.solution.FileTransitionLogger;
 import ar.edu.fcefyn.pcp.tp2.solution.Monitor;
