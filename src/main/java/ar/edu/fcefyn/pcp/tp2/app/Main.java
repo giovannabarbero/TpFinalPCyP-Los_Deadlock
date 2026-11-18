@@ -2,8 +2,8 @@ package ar.edu.fcefyn.pcp.tp2.app;
 
 import ar.edu.fcefyn.pcp.tp2.api.MonitorInterface;
 import ar.edu.fcefyn.pcp.tp2.api.PetriNetConfig;
-// import ar.edu.fcefyn.pcp.tp2.solution.PoliticaAleatoria;
-// import ar.edu.fcefyn.pcp.tp2.solution.PoliticaPriorizada;
+import ar.edu.fcefyn.pcp.tp2.solution.PoliticaAleatoria;
+import ar.edu.fcefyn.pcp.tp2.solution.PoliticaPriorizada;
 import ar.edu.fcefyn.pcp.tp2.api.Politica;
 import ar.edu.fcefyn.pcp.tp2.solution.FileTransitionLogger;
 import ar.edu.fcefyn.pcp.tp2.solution.Monitor;
@@ -218,4 +218,79 @@ public class Main {
                 .mapToLong(Long::parseLong)
                 .toArray();
     }
+
+    // Validaciones
+
+    private static void validarConfiguracion(PetriNetConfig config){
+        int plazas = config.numPlazas();
+        int transiciones = config.numTransiciones();
+
+        if(plazas <= 0 || transiciones <= 0){
+            throw new IllegalArgumentException(
+                "La cantidad de plazas y transiciones dbe ser positiva");
+        }
+
+        validarLongitud(config.marcadoInicial(), plazas, "marcado inicial");
+        validarMatriz(config.matrixPre(), plazas, transiciones, "matriz Pre");
+        validarMatriz(config.matrixIncidencia(), plazas, transiciones, "matriz de incidencia");
+        validarLongitud(config.tiempoMS(), transiciones, "tiempos");
+        validarLongitud(config.pesosPrio(), transiciones, "pesos de prioridad");
+        validarLongitud(config.invariantesP(), config.sumInvariantesP().length,"invariantes de plaza");
+        validarLongitud(config.sumInvariantesP(), config.invariantesP().length,"sumas de invariantes");
+    
+        for(int i = 0; i<config.invariantesP().length; i++){
+            validarLongitud(config.invariantesP()[i], plazas, "invariante de plaza "+i);
+        }
+
+        if(config.transicionFinInvariantes() < 0 || config.transicionFinInvariantes() >= transiciones){
+            throw new IllegalArgumentException("Indice de transición final inválido");
+        }
+
+        if (config.objetivoInvariantes() <= 0) {
+            throw new IllegalArgumentException("El objetivo de invariantes debe ser positivo");
+        }
+
+        if (config.tipoPolitica() != 0 && config.tipoPolitica() != 1) {
+            throw new IllegalArgumentException("La política debe ser 0 (Aleatoria) o 1 (Priorizada)");
+        }
+
+        for (int peso : config.pesosPrio()) {
+            if (peso < 0) {
+                throw new IllegalArgumentException("Los pesos de prioridad no pueden ser negativos");
+            }
+        }
+
+        for (long tiempo : config.tiempoMS()) {
+            if (tiempo < 0) {
+                throw new IllegalArgumentException("Los tiempos no pueden ser negativos");
+            }
+        }
+    }
+
+    private static void validarLongitud(int[] arreglo, int esperada, String nombre) {
+        if (arreglo.length != esperada) {
+            throw new IllegalArgumentException("Dimensión incorrecta en " + nombre);
+        }
+    }
+
+    private static void validarLongitud(long[] arreglo, int esperada, String nombre) {
+        if (arreglo.length != esperada) {
+            throw new IllegalArgumentException("Dimensión incorrecta en " + nombre);
+        }
+    }
+
+    private static void validarLongitud(int[][] arreglo, int esperada, String nombre) {
+        if (arreglo.length != esperada) {
+            throw new IllegalArgumentException("Cantidad incorrecta de filas en " + nombre);
+        }
+    }
+
+    private static void validarMatriz(int[][] matriz, int filas, int columnas, String nombre) {
+        validarLongitud(matriz, filas, nombre);
+
+        for (int i = 0; i < filas; i++) {
+            validarLongitud(matriz[i], columnas, nombre + ", fila " + i);
+        }
+    }
+
 }
