@@ -356,10 +356,16 @@ Cuando una transición de un grupo de conflicto podría dispararse, el monitor l
 
 La política recibe la lista de transiciones del grupo y devuelve una de ellas mediante un sorteo con pesos:
 
-- **Política aleatoria:** pesos iguales para $T_1, T_4, T_6$; cada transacción tiene la misma probabilidad de ir a cada flujo.
-- **Política priorizada:** mayor peso para $T_4$ (flujo de alto riesgo), configurado en `politica.pesos`.
+- **Política aleatoria:** cuando existen varias transiciones habilitadas, se selecciona una de ellas de manera aleatoria. De esta forma, cualquiera de los tres flujos puede ser elegido para procesar la transacción.
+- **Política priorizada:** se otorga prioridad a $T_4$ (flujo de alto riesgo), configurado en `politica.pesos`. Esto es porque requiere la utilización simultánea de los dos recursos compartidos ($P_7$ y $P_8$). Por lo tanto, cuando ambos recursos están disponibles, se intenta seleccionar primero esta transición. Si $T_4$ no puede ejecutarse porque alguno de los recursos está ocupado, se permite seleccionar otra transición que sí cumpla con los requisitos de disponibilidad.
 
 De esta forma la distribución de carga la determina la política y no la estructura de la red, lo que permite demostrar su cumplimiento con los resultados de las ejecuciones.
+
+#### Continuidad de los flujos en la política priorizada
+
+La prioridad que se le da a $T_4$ no implica bloquear permanentemente los otros caminos de procesamiento. La posibilidad de ejecutar cada transición depende de los recursos que necesita y de su disponibilidad en ese momento.
+
+De esta manera, la política priorizada favorece el procesamiento de las transacciones de alto riesgo sin impedir el avance de los otros flujos cuando estos cuentan con los recursos necesarios. Así, se aprovecha la disponibilidad de los recursos compartidos y se evita que la prioridad se convierta en un bloqueo innecesario de las demás transacciones.
 
 ### Verificación de invariantes de plaza
 
