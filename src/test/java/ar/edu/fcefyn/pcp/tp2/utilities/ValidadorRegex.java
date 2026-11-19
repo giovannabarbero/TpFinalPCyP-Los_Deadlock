@@ -23,11 +23,11 @@ public class ValidadorRegex {
             "^(.*)\\bT0\\b(.*?)\\bT6\\b(.*?)\\bT7\\b(.*?)\\bT8\\b(.*?)\\bT9\\b(.*)$"
     );
 
-   //lee el archivo log y valida
-    public ResultadoValidacion validarArchivo(Path rutaLog) throws IOException {
-        String contenidoCrudo = Files.readString(rutaLog);
-        return validar(contenidoCrudo);
-    }
+   //*lee el archivo log y valida
+//    public ResultadoValidacion validarArchivo(Path rutaLog) throws IOException {
+//        String contenidoCrudo = Files.readString(rutaLog);
+//        return validar(contenidoCrudo);
+//    }
 
    //valida el log de a una cadena
     public ResultadoValidacion validar(String logCrudo) {
@@ -35,7 +35,6 @@ public class ValidadorRegex {
             return new ResultadoValidacion(false, 0, 0, 0, 0, "", "El log está vacío.");
         }
 
-        //placeholder hasta tener formato de salida
         String cadenaTrabajo = extraerSecuenciaTransiciones(logCrudo);
 
         int c1 = 0;
@@ -96,7 +95,6 @@ public class ValidadorRegex {
         );
     }
 
-   //corregir cuando se tenga el logger
     private String extraerSecuenciaTransiciones(String logCrudo) {
         Matcher extractor = Pattern.compile("\\bT[0-9]+\\b").matcher(logCrudo);
         List<String> tokens = new ArrayList<>();
