@@ -30,9 +30,13 @@
 
 *Figura 1: Diagrama de Clase.*
 
+![Diagrama de Secuencia](./secuencia_disparo.png)
+
+*Figura 2: Diagrama de Secuencia - Ejecución de disparo por política.*
+
 ![Red de Petri](./Red_De_Petri.png)
 
-*Figura 2: Red de Petri a trabajar.*
+*Figura 3: Red de Petri a trabajar.*
 
 ## Arquitectura de Hilos
 
