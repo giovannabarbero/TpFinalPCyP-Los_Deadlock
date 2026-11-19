@@ -1,0 +1,13 @@
+REPORTE DE EJECUCIÓN - RED DE PETRI PSP
+Política utilizada      : 1 (PRIORIZADA)
+Cantidad total de hilos : 7
+  - Hilo-SA-Admision -> estado final: TERMINATED
+  - Hilo-SB-Tarjeta -> estado final: TERMINATED
+  - Hilo-SC-AltoRiesgo -> estado final: TERMINATED
+  - Hilo-SD-Transferencia -> estado final: TERMINATED
+  - Hilo-SE-Liquidacion-1 -> estado final: TERMINATED
+  - Hilo-SE-Liquidacion-2 -> estado final: TERMINATED
+  - Hilo-SE-Liquidacion-3 -> estado final: TERMINATED
+Tiempo total ejecución  : 37.383 segundos
+Total disparos logueados: 882
+Archivo log de disparos : resultados\disparos_PRIORIZADA_20261118_214954.log

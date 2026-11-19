@@ -32,6 +32,8 @@ public class Main {
         Integer politicaPorConsola = (args.length > 0) ? Integer.parseInt(args[0].trim()) : null;// override by console code java -jar tp2.jar 0/1 prio
 
         PetriNetConfig config = cargarConfiguracion(rutaConfig, politicaPorConsola); // load config
+        validarConfiguracion(config); // validate config
+
         int codigoPolitica = config.tipoPolitica();
         String nombrePolitica = obtenerNombrePolitica(codigoPolitica);
 
