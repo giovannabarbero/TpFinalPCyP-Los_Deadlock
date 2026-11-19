@@ -1,5 +1,40 @@
+# UNIVERSIDAD NACIONAL DE CÓRDOBA
+
+## FACULTAD DE CIENCIAS EXACTAS, FÍSICAS, Y NATURALES
+
+### CÁTEDRA DE PROGRAMACIÓN CONCURRENTE Y PARALELA
+
+**TRABAJO PRÁCTICO N°2 - RED DE PETRI : SISTEMA DE PROCESAMIENTO DE TRANSACCIONES DE PAGO**
+
+**Alumnos:**
+
+* Barbero Giovanna Luz - (46509956)
+* von Büren Thomas - (43136697)
+* Frenguelli Guillermina - (45154313)
+* Fernández María Clara - (44428018)
+
+**Profesores:**
+
+* Ing. Luis Orlando Ventre
+* Ing. Mauricio Ludemann
+* Ing. Agustin Carranza
+* Ing. Gabriel Valenzuela
+
+**Comisión:** ICOMP24-3
+
+**Año:** 2026
+
 ---
-# Arquitectura de Hilos
+
+![Diagrama de Clase](./diagrama_clases.png)
+
+*Figura 1: Diagrama de Clase.*
+
+![Red de Petri](./Red_De_Petri.png)
+
+*Figura 2: Red de Petri a trabajar.*
+
+## Arquitectura de Hilos
 
 La red de nuestro trabajo, pertenece a la clase $S^3 PR$, ya que es una composición de procesos secuenciales simples que comparten recursos.[^1]
 
@@ -123,7 +158,9 @@ Poseemos un `FileTransitionLogger` que cumple el rol de *Output Queue* para cont
 
 *Imagen 1 : Grafico de Hilos en Red de Petri*
 
-# Análisis de la Red de Petri en PIPE
+---
+
+## Análisis de la Red de Petri en PIPE
 
 Para garantizar la validez estructural y dinámica del sistema antes de su implementación, se modeló la Red de Petri Estocástica Generalizada en PIPE v5.0.2 y se ejecutaron los módulos de exploración del espacio de estados y análisis estacionario.
 
@@ -230,12 +267,9 @@ Los resultados revelan un fenómeno crítico de contención de recursos:
 * Validación de ejecución: Los tres T-invariantes deducidos definen exactamente las expresiones regulares utilizadas por el validador post-ejecución para auditar los 200 ciclos completados en el archivo de log.
 * Justificación de políticas de planificación: La inanición teórica observada en `T5` bajo el modelo estocástico sin arbitraje fundamenta la necesidad de implementar y contrastar dos políticas de resolución de conflictos en el Monitor de Java, cuyos tiempos reales (determinísticos en milisegundos) y distribución de carga se analizan en las secciones siguientes.
 
-
-
 ---
-Parte Guillermina <- Borrar al final
----
-# Monitor de Concurrencia
+
+## Monitor de Concurrencia
 
 El monitor es el componente central del sistema: coordina el acceso de los hilos a la red de Petri, de forma que en cada instante como máximo un hilo modifica su estado. No ejecuta las acciones del sistema; solo decide qué transición puede dispararse y cuándo.
 
@@ -402,7 +436,6 @@ El programa debe terminar al completarse 200 invariantes de transición, sin dej
 Cada hilo (`SegmentWorker`) finaliza su ciclo al recibir `false`, y el `Main` espera a todos con `join()`.
 
 La condición de espera de los hilos incluye `!finished`, por lo que un hilo despertado por el `signalAll()` sale del bucle de espera aunque su transición no esté sensibilizada. La variable `finished` no se declara `volatile` porque solo se lee y se escribe dentro del lock, que ya garantiza su visibilidad entre hilos.
-
 
 ## Análisis Temporal: Modelo Analítico vs. Ejecución Práctica
 
