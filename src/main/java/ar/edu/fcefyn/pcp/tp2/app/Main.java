@@ -65,6 +65,10 @@ public class Main {
             for (Thread hilo : hilos) {
                 hilo.start();
             } // start of each thread
+            fin.await(); // espera a que el monitor avise que se completaron los invariantes
+            for (Thread hilo : hilos) {
+                hilo.interrupt(); // despierta a los hilos bloqueados en los semaforos
+            }
 
             // join all threads for graceful stop
             for (Thread hilo : hilos) {
