@@ -1,6 +1,7 @@
 package ar.edu.fcefyn.pcp.tp2.solution;
 
 import ar.edu.fcefyn.pcp.tp2.api.Politica;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ThreadLocalRandom;
 
@@ -8,53 +9,29 @@ public class PoliticaPriorizada implements Politica {
     private final int[] pesosPrio;
 
     public PoliticaPriorizada(int[] pesosPrio) {
-        if (pesosPrio == null || pesosPrio.length != 10) {
-            throw new IllegalArgumentException ("Se necesitan 10 pesos, uno por transición");
-        }
-
         this.pesosPrio = pesosPrio.clone();
-
-        for(int peso : this.pesosPrio){
-            if(peso<0){
-                throw new IllegalArgumentException("Los pesos no pueden ser negativos");
-            }
-        }
     }
 
+    // Elige la despertable de mayor peso (T4 en el config); si empatan, al azar
     @Override
-    public int seleccionar(List<Integer> transicionesCand){
-        if (transicionesCand == null || transicionesCand.isEmpty()){
-            throw new IllegalArgumentException ("No hay transiciones candidatas");
-        }
-
-        long total = 0;
-
-        // Suma de los pesos de las transiciones candidatas
-        for(int transicion : transicionesCand){
-            if(transicion<0 || transicion>=pesosPrio.length){
-                throw new IllegalArgumentException(
-                    "Indice de transición inválido: " + transicion);
+    public int seleccionar(boolean[] despertables) {
+        int pesoMax = -1;
+        List<Integer> mejores = new ArrayList<>();
+        for (int t = 0; t < despertables.length; t++) {
+            if (!despertables[t]) {
+                continue;
             }
-
-            total += pesosPrio[transicion];
-        }
-
-        if(total <= 0){
-            throw new IllegalArgumentException(
-                "La suma de los pesos debe ser mayor que cero");
-        }
-
-        // Sorteo de numero segun el peso total
-        long sorteo = ThreadLocalRandom.current().nextLong(total);
-        // Transición correspondiente al peso
-        for(int transicion : transicionesCand){
-            sorteo -= pesosPrio[transicion];
-            
-            if(sorteo < 0) {
-                return transicion;
+            if (pesosPrio[t] > pesoMax) {
+                pesoMax = pesosPrio[t];
+                mejores.clear();
+            }
+            if (pesosPrio[t] == pesoMax) {
+                mejores.add(t);
             }
         }
-
-        throw new IllegalStateException("No se pudo seleccionar una transición");
+        if (mejores.isEmpty()) {
+            return -1;
+        }
+        return mejores.get(ThreadLocalRandom.current().nextInt(mejores.size()));
     }
 }
