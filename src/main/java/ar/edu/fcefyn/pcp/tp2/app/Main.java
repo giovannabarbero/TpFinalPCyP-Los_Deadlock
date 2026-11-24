@@ -20,6 +20,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Properties;
+import java.util.concurrent.CountDownLatch;
 
 public class Main {
 
@@ -51,7 +52,8 @@ public class Main {
             Politica politica = (codigoPolitica == POLITICA_PRIORIZADA)
                     ? new PoliticaPriorizada(config.pesosPrio())
                     : new PoliticaAleatoria();
-            MonitorInterface monitor = new Monitor(config, politica, logger); // dependency inject. Monitor builds itself through its config, its policies, and its logger
+            CountDownLatch fin = new CountDownLatch(1);
+            MonitorInterface monitor = new Monitor(config, politica, logger, fin);
 
             hilos = crearHilosDeSegmentos(monitor); // goto function - thread creation for each Petri net segment
 

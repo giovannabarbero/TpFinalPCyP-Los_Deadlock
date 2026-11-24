@@ -1,14 +1,11 @@
 package ar.edu.fcefyn.pcp.tp2.api;
 
-import java.util.List;
-
 public interface Politica {
     /*
-     * Recibe T sensibilizada con hilos esperando y devuelve cual debe dispararse, recibe pesos por config
+     * Se llama UNA sola vez, despues de cada disparo exitoso.
      *
-     *  @param transicionesCand lista de indices de transiciones en conflicto
-     *
-     * @return indice de la transicion elegida
+     * @param despertables despertables[t] = true si t esta sensibilizada Y tiene hilos esperando
+     * @return la transicion elegida para despertar, o -1 si no hay ninguna
      */
-    int seleccionar(List<Integer> transicionesCand);
+    int seleccionar(boolean[] despertables);
 }

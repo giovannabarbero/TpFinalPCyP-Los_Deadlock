@@ -17,6 +17,8 @@ import java.util.Arrays;
 import java.util.ArrayList;
 import java.util.List;
 
+import java.util.concurrent.CountDownLatch;
+
 public class Monitor implements MonitorInterface {
 
     //atributos
@@ -31,6 +33,7 @@ public class Monitor implements MonitorInterface {
     private final int[] sumInvariantesP;  // cuanto tiene que dar cada suma
     private final Politica politica;          // decide en los conflictos (se usa en el paso 4)
     private final TransitionLogger logger;  // registra cada disparo en el archivo de log
+    private final CountDownLatch fin;    // avisa al Main que se completaron los invariantes
     private final int transicionFin;       // que transicion marca un invariante completo (T9)
     private final int objetivo;          // cuantas veces tiene que dispararse (200)
     private int disparosFin = 0;           // cuantas veces se disparo hasta ahora
@@ -45,7 +48,7 @@ public class Monitor implements MonitorInterface {
 
     //constructor
     //el monitor es agnostico solo recibe numeros si cambiamos la red cambiaria la configuracion y el Monitor queda igual
-    public Monitor(PetriNetConfig config, Politica politica, TransitionLogger logger) {
+    public Monitor(PetriNetConfig config, Politica politica, TransitionLogger logger, CountDownLatch fin) {
         this.pre = config.matrixPre();
         this.incidencia = config.matrixIncidencia();
         this.marcado = config.marcadoInicial().clone();
@@ -61,6 +64,7 @@ public class Monitor implements MonitorInterface {
 
         this.politica = politica;
         this.logger = logger;
+        this.fin = fin;
 
         // la condicion de fin viene de config
         this.transicionFin = config.transicionFinInvariantes();
@@ -137,6 +141,7 @@ public class Monitor implements MonitorInterface {
                 disparosFin++;                 // un invariante completo mas
                 if (disparosFin >= objetivo) { // llegamos a 200
                     finished = true;
+                    fin.countDown();
                     despertarATodos();
                     return true;
                 }
@@ -281,8 +286,12 @@ public class Monitor implements MonitorInterface {
             return true;                       // no esta en conflicto (o no hay politica): puede disparar
         }
         if (elegida[g] < 0) {
-            elegida[g] = politica.seleccionar(grupos.get(g));   // preguntamos UNA vez
+            boolean[] candidatas = new boolean[esperando.length];
+            for (int x : grupos.get(g)) {
+                candidatas[x] = true;
+            }
+            elegida[g] = politica.seleccionar(candidatas);
         }
-        return elegida[g] == t;                // solo dispara si es la elegida
+        return elegida[g] == t;                //  solo dispara si es la elegida
     }
 }
