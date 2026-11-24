@@ -38,6 +38,11 @@ public class FileTransitionLogger implements TransitionLogger {
     }
 
     @Override
+    public synchronized void logDecision(boolean[] candidatas, int elegida) {
+        // TODO (Thomas): escribir candidatas y elegida en el log de decisiones
+    }
+
+    @Override
     public synchronized void close() {
         try {
             writer.flush();

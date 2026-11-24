@@ -1,12 +1,17 @@
 package ar.edu.fcefyn.pcp.tp2.api;
 
 public interface Politica {
+public interface Politica {
 
     /**
-     * despertables[t] = true si la transición t
-     * está sensibilizada Y tiene hilos esperando.
+     * Se llama UNA sola vez, después de cada disparo exitoso.
      *
-     * @return transición elegida o -1 si no hay ninguna.
+     * @param despertables despertables[t] = true si t está
+     * sensibilizada Y tiene hilos esperando.
+     *
+     * @return la transición elegida para despertar,
+     * o -1 si no hay ninguna.
      */
     int seleccionar(boolean[] despertables);
+
 }

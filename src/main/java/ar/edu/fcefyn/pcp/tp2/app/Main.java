@@ -20,6 +20,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Properties;
+import java.util.concurrent.CountDownLatch;
 
 public class Main {
 
@@ -32,6 +33,8 @@ public class Main {
         Integer politicaPorConsola = (args.length > 0) ? Integer.parseInt(args[0].trim()) : null;// override by console code java -jar tp2.jar 0/1 prio
 
         PetriNetConfig config = cargarConfiguracion(rutaConfig, politicaPorConsola); // load config
+        validarConfiguracion(config); // validate config
+
         int codigoPolitica = config.tipoPolitica();
         String nombrePolitica = obtenerNombrePolitica(codigoPolitica);
 
@@ -49,7 +52,8 @@ public class Main {
             Politica politica = (codigoPolitica == POLITICA_PRIORIZADA)
                     ? new PoliticaPriorizada(config.pesosPrio())
                     : new PoliticaAleatoria();
-            MonitorInterface monitor = new Monitor(config, politica, logger); // dependency inject. Monitor builds itself through its config, its policies, and its logger
+            CountDownLatch fin = new CountDownLatch(1);
+            MonitorInterface monitor = new Monitor(config, politica, logger, fin);
 
             hilos = crearHilosDeSegmentos(monitor); // goto function - thread creation for each Petri net segment
 
@@ -61,6 +65,10 @@ public class Main {
             for (Thread hilo : hilos) {
                 hilo.start();
             } // start of each thread
+            fin.await(); // espera a que el monitor avise que se completaron los invariantes
+            for (Thread hilo : hilos) {
+                hilo.interrupt(); // despierta a los hilos bloqueados en los semaforos
+            }
 
             // join all threads for graceful stop
             for (Thread hilo : hilos) {
