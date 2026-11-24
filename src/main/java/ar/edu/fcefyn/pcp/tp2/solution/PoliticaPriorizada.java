@@ -1,60 +1,72 @@
+
 package ar.edu.fcefyn.pcp.tp2.solution;
 
 import ar.edu.fcefyn.pcp.tp2.api.Politica;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ThreadLocalRandom;
 
 public class PoliticaPriorizada implements Politica {
+
     private final int[] pesosPrio;
 
     public PoliticaPriorizada(int[] pesosPrio) {
-        if (pesosPrio == null || pesosPrio.length != 10) {
-            throw new IllegalArgumentException ("Se necesitan 10 pesos, uno por transición");
+
+        if (pesosPrio == null || pesosPrio.length == 0) {
+            throw new IllegalArgumentException(
+                "Los pesos de prioridad son inválidos"
+            );
         }
 
         this.pesosPrio = pesosPrio.clone();
 
-        for(int peso : this.pesosPrio){
-            if(peso<0){
-                throw new IllegalArgumentException("Los pesos no pueden ser negativos");
+        for (int peso : this.pesosPrio) {
+            if (peso < 0) {
+                throw new IllegalArgumentException(
+                    "Los pesos no pueden ser negativos"
+                );
             }
         }
     }
 
     @Override
-    public int seleccionar(List<Integer> transicionesCand){
-        if (transicionesCand == null || transicionesCand.isEmpty()){
-            throw new IllegalArgumentException ("No hay transiciones candidatas");
-        }
+    public int seleccionar(boolean[] despertables) {
 
-        long total = 0;
-
-        // Suma de los pesos de las transiciones candidatas
-        for(int transicion : transicionesCand){
-            if(transicion<0 || transicion>=pesosPrio.length){
-                throw new IllegalArgumentException(
-                    "Indice de transición inválido: " + transicion);
-            }
-
-            total += pesosPrio[transicion];
-        }
-
-        if(total <= 0){
+        if (despertables == null ||
+            despertables.length != pesosPrio.length) {
             throw new IllegalArgumentException(
-                "La suma de los pesos debe ser mayor que cero");
+                "El vector de transiciones tiene una dimensión inválida"
+            );
         }
 
-        // Sorteo de numero segun el peso total
-        long sorteo = ThreadLocalRandom.current().nextLong(total);
-        // Transición correspondiente al peso
-        for(int transicion : transicionesCand){
-            sorteo -= pesosPrio[transicion];
-            
-            if(sorteo < 0) {
-                return transicion;
+        int mayorPeso = -1;
+        List<Integer> mejores = new ArrayList<>();
+
+        // Buscamos la candidata con mayor prioridad
+        for (int t = 0; t < despertables.length; t++) {
+
+            if (despertables[t]) {
+
+                if (pesosPrio[t] > mayorPeso) {
+                    mayorPeso = pesosPrio[t];
+                    mejores.clear();
+                    mejores.add(t);
+
+                } else if (pesosPrio[t] == mayorPeso) {
+                    mejores.add(t);
+                }
             }
         }
 
-        throw new IllegalStateException("No se pudo seleccionar una transición");
+        // No hay transiciones para despertar
+        if (mejores.isEmpty()) {
+            return -1;
+        }
+
+        // Si hay empate, elegimos aleatoriamente
+        int indice = ThreadLocalRandom.current()
+                .nextInt(mejores.size());
+
+        return mejores.get(indice);
     }
 }
