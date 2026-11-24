@@ -346,26 +346,37 @@ Esto coincide con el análisis GSPN de PIPE (throughput de $T_5$ igual a 0) y co
 
 Por este motivo, una política que solo elija entre las transiciones sensibilizadas no resuelve el problema: $T_4$ casi nunca es candidata.
 
-#### Solución: elegir y esperar
+#### Políticas de resolución de conflictos
 
-Cuando una transición de un grupo de conflicto podría dispararse, el monitor le consulta a la política **una única vez** cuál de las transiciones del grupo debe dispararse, y guarda la elección. A partir de ahí:
+El sistema implementa dos políticas diferentes para resolver los conflictos entre transiciones de la Red de Petri: una política aleatoria y una política priorizada.
 
-1. Una transición del grupo solo puede dispararse si está sensibilizada **y** es la elegida.
-2. Si la elegida no está sensibilizada (por ejemplo, $T_4$ con algún recurso ocupado), el token permanece en $P_1$ y las demás transiciones del grupo esperan aunque estén sensibilizadas.
-3. Cuando la elegida se dispara, la elección se borra y, para el próximo token, se vuelve a consultar a la política.
+Ambas políticas implementas la interfaz Politica, cuyo método  seleccionar(boolean[] despertables) recibe un vector booleano con tantas posiciones como transiciones posee la red.
 
-La política recibe la lista de transiciones del grupo y devuelve una de ellas mediante un sorteo con pesos:
+Cada posición del vector indica si una trnasición está sensibilizada y tiene al menos un hilo esperando para ejecutarse. De esta manera, la política solamente puede seleccionar transiciones que puedan ser despertadas.
 
-- **Política aleatoria:** cuando existen varias transiciones habilitadas, se selecciona una de ellas de manera aleatoria. De esta forma, cualquiera de los tres flujos puede ser elegido para procesar la transacción.
-- **Política priorizada:** se otorga prioridad a $T_4$ (flujo de alto riesgo), configurado en `politica.pesos`. Esto es porque requiere la utilización simultánea de los dos recursos compartidos ($P_7$ y $P_8$). Por lo tanto, cuando ambos recursos están disponibles, se intenta seleccionar primero esta transición. Si $T_4$ no puede ejecutarse porque alguno de los recursos está ocupado, se permite seleccionar otra transición que sí cumpla con los requisitos de disponibilidad.
+##### Política aleatoria
 
-De esta forma la distribución de carga la determina la política y no la estructura de la red, lo que permite demostrar su cumplimiento con los resultados de las ejecuciones.
+Selecciona uniformemente una de las transiciones candidatas. Todas las transiciones que tienen valor true en el vector poseen la misma probabilidad de ser elegidas.
 
-#### Continuidad de los flujos en la política priorizada
+Si no existen transiciones candidatas, devuelve -, indicando que no hay ningún hilo para despertar
 
-La prioridad que se le da a $T_4$ no implica bloquear permanentemente los otros caminos de procesamiento. La posibilidad de ejecutar cada transición depende de los recursos que necesita y de su disponibilidad en ese momento.
+##### Política priorizada
 
-De esta manera, la política priorizada favorece el procesamiento de las transacciones de alto riesgo sin impedir el avance de los otros flujos cuando estos cuentan con los recursos necesarios. Así, se aprovecha la disponibilidad de los recursos compartidos y se evita que la prioridad se convierta en un bloqueo innecesario de las demás transacciones.
+Utiliza los pesos definidos en el archivo config.properties, emdiante el parámetro politica.pesos.
+
+Para cada decisión, identifica las transiciones candidatas y selecciona aquella que posee el mayor peso de prioridad. En caso de que dos o más candidatas tengan el mismo peso máximo, realiza una elección aleatoria entre ellas.
+
+En la configuración utilizada, la transición T4 posee un peso de 3, mientras que T1 y T6 poseen un peso de 1. Por lo tanto, cuando T4 compite con alguna de las otras transiciones, resulta seleccionada siempre. Si T4 no se encuentra entre las candidatas, la política permite seleccionar aleatoriamente entre las restantes.
+
+##### Momento de invocación de las políticas
+
+El monitor consulta a la política una única vez después de cada disparo exitoso. Para ello construye el vector completo de transiciones despertables, considerando simultaneamnete dos condiciones: que la transición este sensibilizada y que tenga al menos un hilo esperando.
+
+La política devuelve el índice de la transición que debe ser despertada o -1 si no existen candidatas.
+
+Esta implementación evita que la política sea consultada cuando un hilo ingresa al monitor y encuentra su transición habilitada. En ese caso, el hilo puede ejecutar directamente su disparo.
+
+De esta manera, se separa la responsabilidad de sincronización y control de concurrencia, que corresponde al monitor, de la responsabilidad de selección, que corresponde a la política
 
 ### Verificación de invariantes de plaza
 
