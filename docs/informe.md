@@ -30,9 +30,9 @@
 
 *Figura 1: Diagrama de Clase.*
 
-![Diagrama de Secuencia](./secuencia_disparo.png)
+![Diagrama de Secuencia](./secuencia_monitor_semaforos.png)
 
-*Figura 2: Diagrama de Secuencia - Ejecución de disparo por política.*
+*Figura 2: Diagrama de Secuencia - Disparo de una transición en el monitor (semáforos, signal and exit).*
 
 ![Red de Petri](./Red_De_Petri.png)
 
