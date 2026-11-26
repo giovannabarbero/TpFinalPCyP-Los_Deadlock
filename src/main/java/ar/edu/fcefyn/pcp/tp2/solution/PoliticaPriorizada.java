@@ -28,9 +28,7 @@ for (int peso : this.pesosPrio) {
 }
     }
 
-    // Elige la despertable de mayor peso (T4 en el config); si empatan, al azar
-    @Override
-    public int seleccionar(boolean[] despertables) {
+
 // Elige la despertable de mayor peso; si empatan, al azar
 @Override
 public int seleccionar(boolean[] despertables) {
@@ -73,4 +71,3 @@ public int seleccionar(boolean[] despertables) {
     return mejores.get(indice);
 }
     }
-}
