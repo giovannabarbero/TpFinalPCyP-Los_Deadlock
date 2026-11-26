@@ -92,7 +92,8 @@ public class Main {
                 hilos,
                 duracionSegundos,
                 logger.getTotalDisparos(),
-                rutaLogDisparos
+                rutaLogDisparos,
+                rutaLogDecisiones
         ); // shows on console and saves the summary
     }
 
@@ -107,7 +108,7 @@ public class Main {
     } // translates codification to string
 
     /**
-     * create 7 threads for 5 exe seg SA..SE)
+     * create 9 threads for 5 exe seg SA..SE)
      * using S^3PR & Case 1,2 from assignmetn
      */
     private static List<Thread> crearHilosDeSegmentos(MonitorInterface monitor) {
@@ -149,18 +150,20 @@ public class Main {
             List<Thread> hilos,
             double duracionSegundos,
             long totalDisparos,
-            Path rutaLogDisparos
+            Path rutaLogDisparos,
+            Path rutaLogDecisiones
     ) throws IOException {
         StringBuilder sb = new StringBuilder();
         sb.append("REPORTE DE EJECUCIÓN - RED DE PETRI PSP\n");
-        sb.append("Política utilizada      : ").append(codigoPolitica).append(" (").append(nombrePolitica).append(")\n");
-        sb.append("Cantidad total de hilos : ").append(hilos.size()).append("\n");
+        sb.append("Política utilizada       : ").append(codigoPolitica).append(" (").append(nombrePolitica).append(")\n");
+        sb.append("Cantidad total de hilos  : ").append(hilos.size()).append("\n");
         for (Thread h : hilos) {
             sb.append("  - ").append(h.getName()).append(" -> estado final: ").append(h.getState()).append("\n");
         }
-        sb.append(String.format("Tiempo total ejecución  : %.3f segundos%n", duracionSegundos));
-        sb.append("Total disparos logueados: ").append(totalDisparos).append("\n");
-        sb.append("Archivo log de disparos : ").append(rutaLogDisparos).append("\n");
+        sb.append(String.format("Tiempo total ejecución   : %.3f segundos%n", duracionSegundos));
+        sb.append("Total disparos logueados : ").append(totalDisparos).append("\n");
+        sb.append("Archivo log de disparos  : ").append(rutaLogDisparos).append("\n");
+        sb.append("Archivo log de decisiones: ").append(rutaLogDecisiones).append("\n");
 
         String resumen = sb.toString();
         System.out.println(resumen);

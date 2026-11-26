@@ -55,7 +55,7 @@ public class FileTransitionLogger implements TransitionLogger {
 
     @Override
     public synchronized void logDecision(boolean[] candidatas, int elegida) {
-        if (candidatas == null) {
+        if (candidatas == null || candidatas.length == 0) {
             return;
         }
         List<String> activas = new ArrayList<>();
@@ -68,7 +68,7 @@ public class FileTransitionLogger implements TransitionLogger {
             return;
         }
 
-        String textoElegida = (elegida >= 0) ? "T" + elegida : "NINGUNA";
+        String textoElegida = (elegida >= 0 && elegida < candidatas.length) ? "T" + elegida : "NINGUNA";
         String linea = "candidatas=" + String.join(", ", activas) + " elegida=" + textoElegida + System.lineSeparator();
 
         try {
