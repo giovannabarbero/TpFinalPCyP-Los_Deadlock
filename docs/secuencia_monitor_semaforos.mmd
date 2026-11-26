@@ -1,0 +1,76 @@
+sequenceDiagram
+    actor H as Hilo
+    participant M as Monitor
+    participant X as Mutex
+    participant R as Red de Petri
+    participant T as Control Temporal
+    participant C as Colas de Condición
+    participant P as Política
+
+    H->>M: fireTransition(transicion)
+    M->>X: acquire()
+
+    loop Hasta lograr un disparo exitoso
+        alt finished == true
+            M->>X: release()
+            M-->>H: disparo no exitoso (el hilo termina)
+        end
+        M->>T: hayAlguienEsperandoVentana(transicion)
+        M->>R: puedeDisparar(transicion)
+        R-->>M: sensibilizada
+        alt Alguien esperando ventana o transición no sensibilizada
+            M->>X: release()
+            M->>C: esperar(transicion)
+            Note right of C: El hilo queda bloqueado en la cola<br/>asociada a su transición (esperando[t]++)
+            C-->>M: hilo despertado
+            Note right of M: Hereda el mutex (signal and exit)<br/>Vuelve al loop e intenta disparar nuevamente
+            M->>M: continue
+        else Transición sensibilizada
+            M->>T: tiempoRestante(transicion)
+            T->>T: transcurrido = ahora() - timestampSensibilizacion()
+            alt Antes de la ventana: transcurrido < alfa
+                T-->>M: tiempoEspera = alfa - transcurrido
+                M->>T: setEsperandoVentana(transicion)
+                M->>X: release()
+                M->>T: sleep(tiempoEspera)
+                Note right of T: El hilo duerme sin el mutex<br/>hasta alcanzar alfa
+                T-->>M: fin de espera
+                M->>X: acquire()
+                M->>T: limpiarEsperandoVentana(transicion)
+                Note right of M: Vuelve al loop e intenta disparar nuevamente
+                M->>M: continue
+            else Dentro de la ventana: transcurrido >= alfa (beta = infinito)
+                T-->>M: puedeDisparar = true
+                Note right of M: Sale del loop
+            end
+        end
+    end
+
+    M->>R: disparar(transicion)
+    Note right of R: M' = M + I · σ<br/>Se actualizan timestamps, se verifican<br/>los invariantes de plaza y se registra en el log
+    R-->>M: disparoExitoso
+
+    alt Se completaron los 200 invariantes
+        M->>M: finished = true, fin.countDown()
+        M->>X: release()
+        Note right of M: El Main interrumpe a los hilos bloqueados
+    else Disparo exitoso
+        M->>R: obtenerSensibilizadas()
+        R-->>M: transicionesSensibilizadas
+        M->>C: obtenerHilosEsperando()
+        C-->>M: hilosEsperando
+        M->>M: obtenerHilosDespertables()
+        Note right of M: hilosDespertables = sensibilizadas<br/>AND esperando AND NOT esperandoVentana
+        alt Hay hilos para despertar
+            M->>P: seleccionar(hilosDespertables)
+            Note right of P: Única llamada a la política
+            P-->>M: transicionElegida
+            M->>C: despertar(transicionElegida)
+            Note right of M: El hilo actual sale del monitor<br/>sin liberar el mutex.<br/>El hilo despertado continúa con el control.
+        else No hay hilos para despertar
+            M->>X: release()
+            Note right of M: No hay ningún hilo esperando<br/>que pueda continuar.<br/>Se libera el mutex.
+        end
+    end
+
+    M-->>H: disparo exitoso
