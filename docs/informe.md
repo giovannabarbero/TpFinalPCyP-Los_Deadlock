@@ -410,108 +410,157 @@ A partir de ese momento, todo hilo que entra al monitor encuentra `finished = tr
 
 La variable `finished` no se declara `volatile` porque solo se lee y se escribe en posesión del mutex, y la adquisición y liberación del semáforo garantizan la visibilidad de los cambios entre hilos.
 
+## Validación de Invariantes con Expresión Regular
+
+Para comprobar que cada ejecución completa exactamente $200$ T-invariantes, y que cada uno respeta el orden causal de la red, el archivo de *log* de disparos se valida con la clase `ValidadorRegex`. Esta clase usa una única expresión regular que contiene los tres T-invariantes como alternativas.
+
+### Preprocesamiento
+
+Primero se extraen del *log* todos los tokens de la forma `T<número>` (patrón `\bT[0-9]+\b`) y se los une con espacios. Así se obtiene una cadena con la secuencia completa de disparos, por ejemplo: `T0 T0 T1 T6 T2 T7 T3 T8 T9 T9 ...`.
+
+### Expresión regular
+
+```
+^(.*)\bT0\b(.*?)(?:\bT1\b(.*?)\bT2\b(.*?)\bT3\b|\bT4\b(.*?)\bT5\b|\bT6\b(.*?)\bT7\b(.*?)\bT8\b)(.*?)\bT9\b(.*)$
+```
+
+| Parte | Significado |
+| :--- | :--- |
+| `^(.*)` | Todo lo anterior al `T0` del invariante que se reconoce (grupo 1). |
+| `\bT0\b` | Admisión de la transacción. |
+| `(.*?)` | Disparos de otros invariantes intercalados entre `T0` y la rama (grupo 2). |
+| `(?: ... \| ... \| ... )` | Alternativa entre las tres ramas: Tarjeta `T1 … T2 … T3`, Alto riesgo `T4 … T5` y Transferencia `T6 … T7 … T8`. Los grupos internos capturan lo que está intercalado entre cada par de transiciones de la rama. |
+| `(.*?)\bT9\b` | Disparos intercalados antes de la liquidación (grupo 8) y la liquidación `T9`. |
+| `(.*)$` | Todo lo posterior al `T9` (grupo 9). |
+
+Los delimitadores `\b` evitan coincidencias parciales, como confundir `T1` con `T10`. Los cuantificadores perezosos `.*?` hacen que se tomen las transiciones más cercanas que completan el invariante.
+
+### Algoritmo de reconocimiento
+
+1. Se aplica la expresión sobre la cadena completa (`matches()`).
+2. Si coincide, se identifica qué invariante se reconoció según el grupo que capturó: grupo 3 para Tarjeta, grupo 5 para Alto riesgo y, en otro caso, Transferencia. Se incrementa el contador correspondiente.
+3. Se reconstruye la cadena concatenando todos los grupos capturados. Es decir, se eliminan únicamente las transiciones del invariante reconocido y se conservan los disparos de otros invariantes que estaban intercalados entre ellas. Esto es lo que permite validar un *log* concurrente, donde los invariantes no aparecen contiguos.
+4. Se repite hasta que la cadena quede vacía o la expresión ya no coincida.
+
+El *log* es válido solo si la cadena final queda vacía y el total reconocido es exactamente 200. Si sobran transiciones, el validador informa el remanente.
+
+**Ejemplo con dos invariantes intercalados:**
+
+| Paso | Cadena | Invariante reconocido |
+| :---: | :--- | :--- |
+| 0 | `T0 T0 T1 T6 T2 T7 T3 T8 T9 T9` | — |
+| 1 | `T0 T6 T7 T8 T9` | Tarjeta (se eliminan `T0 T1 T2 T3 T9`) |
+| 2 | *(vacía)* | Transferencia (se eliminan `T0 T6 T7 T8 T9`) |
+
+### Pruebas con logs rotos
+
+La clase de test `ValidadorInvariantesTest` verifica que el validador acepta los *logs* correctos y rechaza los alterados manualmente:
+
+| Caso de prueba | Resultado esperado |
+| :--- | :--- |
+| Log secuencial con 200 invariantes | Válido |
+| Log con invariantes intercalados (concurrente) | Válido |
+| Se elimina una transición intermedia (`T2`) | Inválido: quedan transiciones huérfanas |
+| Se invierte el orden causal (`T2` antes que `T1`) | Inválido |
+| Se agrega una transición suelta (`T4`) | Inválido: el remanente contiene `T4` |
+| Ciclo truncado al final (`T0 T1 T2`) | Inválido: remanente `T0 T1 T2` |
+| 199 o 201 invariantes | Inválido: cantidad incorrecta |
+| Log vacío o nulo | Inválido |
+
+Además, se alteró a mano un *log* real de ejecución (200 invariantes válidos) y en todos los casos el validador detectó el error:
+
+| Alteración sobre el log real | Remanente informado |
+| :--- | :--- |
+| Ninguna (original) | — (válido, 200 invariantes) |
+| Se elimina el primer `T2` | `T0 T3` |
+| Se intercambia el primer `T1` con el siguiente `T2` | `T0 T2` |
+| Se agrega un `T5` suelto al final | `T5` |
+| Se reemplaza el primer `T9` por `T8` | `T0 T8` |
+
 ## Análisis Temporal: Modelo Analítico vs. Ejecución Práctica
 
-Con el objetivo de garantizar que la simulación de 200 invariantes completos se ejecute dentro de la ventana exigida de 20 a 40 segundos, se formuló un modelo analítico de cota inferior basado en la ocupación de los recursos compartidos (`P7` y `P8`) y se calibraron los retardos de las transiciones temporizadas en `config/config.properties`.
+### Configuración base
 
----
+Cada transición temporizada tiene un tiempo mínimo $\alpha$ con intervalo $[\alpha, \infty)$: solo puede dispararse una vez transcurridos al menos $\alpha$ ms desde que quedó sensibilizada. Las transiciones inmediatas (`T0`, `T1`, `T4`, `T6`, `T9`) tienen $\alpha = 0$.
 
-### Semántica Temporal y Duración por Flujo (T-Invariante)
+Configuración base en `config/config.properties`:
 
-Bajo la semántica temporal de la red, cada transición temporizada tiene asociado un retardo mínimo $\alpha$ (intervalo $[\alpha, \infty)$), de modo que solo puede dispararse una vez transcurridos al menos $\alpha\text{ ms}$ desde el instante en que quedó sensibilizada. Las transiciones inmediatas (`T0`, `T1`, `T4`, `T6`, `T9`) aportan un retardo nulo ($0\text{ ms}$).
+```
+red.tiempos.ms=0,0,130,130,0,200,0,130,130,0
+politica.pesos=1,1,1,1,3,1,1,1,1,1
+```
 
-Para la Configuración Base establecida en `config.properties` (`red.tiempos.ms=0,0,85,85,0,210,0,95,95,0`), cada flujo retiene su(s) recurso(s) compartido(s) durante el siguiente tiempo de servicio:
+| T-Invariante (Flujo) | Secuencia | Recurso(s) ocupado(s) | Duración por ciclo ($D_i$) |
+| :--- | :--- | :--- | :---: |
+| **Tarjeta** | $T_0 \rightarrow T_1 \rightarrow T_2 \rightarrow T_3 \rightarrow T_9$ | `P7` (gateway) | $D_1 = 130 + 130 = \mathbf{260\text{ ms}}$ |
+| **Alto riesgo** | $T_0 \rightarrow T_4 \rightarrow T_5 \rightarrow T_9$ | `P7` y `P8` en simultáneo | $D_2 = \mathbf{200\text{ ms}}$ |
+| **Transferencia** | $T_0 \rightarrow T_6 \rightarrow T_7 \rightarrow T_8 \rightarrow T_9$ | `P8` (antifraude) | $D_3 = 130 + 130 = \mathbf{260\text{ ms}}$ |
 
-| T-Invariante (Flujo) | Secuencia de Disparos | Recurso(s) Ocupado(s)      | Transiciones Temporizadas | Duración Total por Ciclo ($D_i$) |
-| :--- | :--- |:---------------------------| :--- | :---: |
-| **IT1 — Tarjeta** | $T_0 \rightarrow T_1 \rightarrow T_2 \rightarrow T_3 \rightarrow T_9$ | `P7` (Gateway de tarjetas) | $t_2 = 85\text{ ms},\; t_3 = 85\text{ ms}$ | $D_1 = 85 + 85 = \mathbf{170\text{ ms}}$ |
-| **IT2 — Alto riesgo** | $T_0 \rightarrow T_4 \rightarrow T_5 \rightarrow T_9$ | `P7` y `P8` en simultáneo  | $t_5 = 210\text{ ms}$ | $D_2 = \mathbf{210\text{ ms}}$ |
-| **IT3 — Transferencia** | $T_0 \rightarrow T_6 \rightarrow T_7 \rightarrow T_8 \rightarrow T_9$ | `P8` (Motor antifraude)    | $t_7 = 95\text{ ms},\; t_8 = 95\text{ ms}$ | $D_3 = 95 + 95 = \mathbf{190\text{ ms}}$ |
+### Modelo analítico
 
----
+Por los P-invariantes $M(P_2)+M(P_3)+M(P_4)+M(P_7)=1$ y $M(P_4)+M(P_5)+M(P_6)+M(P_8)=1$, cada recurso atiende una sola transacción a la vez:
 
-### Deducción de la Fórmula Analítica de Tiempo Teórico
+1. Ramas laterales en paralelo. Tarjeta usa solo `P7` y Transferencia usa solo `P8`, por lo que pueden ejecutarse simultáneamente. Su aporte está dado por el recurso más exigido: $\max(N_1 \cdot D_1,\; N_6 \cdot D_3)$.
+2. Rama central serializada. Cada transacción de Alto riesgo toma `P7` y `P8` a la vez y los retiene durante $D_2$, deteniendo ambas ramas laterales. Su aporte es $N_4 \cdot D_2$.
 
-A partir de los P-invariantes de exclusión mutua ($M(P_7) + M(P_2) + M(P_3) + M(P_4) = 1$ y $M(P_8) + M(P_4) + M(P_5) + M(P_6) = 1$), cada recurso compartido puede atender como máximo una transacción a la vez:
+$$T_{\text{ideal}} = N_4 \cdot D_2 + \max\left(N_1 \cdot D_1,\; N_6 \cdot D_3\right)$$
 
-1. Paralelismo entre ramas laterales: Dado que Tarjeta (`IT1`) utiliza exclusivamente `P7` y Transferencia (`IT3`) utiliza exclusivamente `P8`, ambas ramas pueden ejecutarse de forma concurrente sin bloquearse entre sí. El tiempo mínimo requerido para completar $N_1$ ciclos de Tarjeta y $N_6$ ciclos de Transferencia está determinado por el recurso más exigido:
-   $$T_{\text{paralelo}} = \max\Big(N_1 \cdot D_1,\; N_6 \cdot D_3\Big)$$
+Con $D_1 = D_3 = D$ y, como se observa en todas las corridas, $N_1 \approx N_6 = \frac{200 - N_4}{2}$:
 
-2. Serialización por rama central: Cada vez que se ejecuta una transacción de Alto riesgo (`IT2`), la transición `T4` toma ambos recursos (`P7` y `P8`) en simultáneo y los retiene durante todo el servicio de `T5` ($D_2$). Esto detiene el paralelismo entre las ramas laterales, sumando un tiempo estrictamente secuencial de $N_4 \cdot D_2$.
+$$T_{\text{ideal}} = 100 \cdot D + N_4 \cdot \left(D_2 - \frac{D}{2}\right) = 26\text{ s} + 0{,}07\text{ s} \cdot N_4$$
 
-Combinando ambos componentes para una ejecución total de $N_1 + N_4 + N_6 = 200$ invariantes, la cota inferior analítica del tiempo de ejecución viene dada por:
+Así, la configuración base acota el tiempo entre $26\text{ s}$ (si no hubiera ninguna transacción de alto riesgo) y $40\text{ s}$ (si las 200 fueran de alto riesgo). Esto garantiza que se cumple la ventana de 20 a 40 segundos para cualquier distribución de ramas. Cada transacción de alto riesgo agrega $70$ ms al tiempo total, porque bloquea las dos ramas laterales durante 200 ms en lugar de ocupar una sola durante 260 ms.
 
-$$T_{\text{teórico}} = N_4 \cdot D_2 + \max\Big(N_1 \cdot D_1,\; N_6 \cdot D_3\Big)$$
+La cantidad total de disparos es $1000 - N_4$: los invariantes de Tarjeta y Transferencia tienen 5 transiciones y el de Alto riesgo tiene 4.
 
-Reemplazando con los retardos de la configuración base:
+### Resultados experimentales (configuración base)
 
-$$T_{\text{teórico}} = N_4 \cdot 210\text{ ms} + \max\Big(N_1 \cdot 170\text{ ms},\; N_6 \cdot 190\text{ ms}\Big)$$
+Se realizaron 5 ejecuciones por política. Cada *log* se validó con `ValidadorRegex`. La columna "T4 elegida / candidata" se obtiene del *log* de decisiones (`decisiones_*.log`): cuenta en cuántas decisiones `T4` estaba entre las despertables y en cuántas fue la elegida.
 
----
+| Política | Corrida | $(N_1, N_4, N_6)$ | Disparos | T4 elegida / candidata | $T_{\text{ideal}}$ | $T_{\text{práctico}}$ | Diferencia |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| Aleatoria | 1 | (97, 7, 96) | 993 | 3 / 14 | 26,62 s | 26,72 s | +0,10 s |
+| Aleatoria | 2 | (91, 18, 91) | 982 | 15 / 27 | 27,26 s | 27,36 s | +0,10 s |
+| Aleatoria | 3 | (99, 2, 99) | 998 | 2 / 3 | 26,14 s | 26,23 s | +0,09 s |
+| Aleatoria | 4 | (92, 16, 92) | 984 | 11 / 26 | 27,12 s | 27,22 s | +0,10 s |
+| Aleatoria | 5 | (94, 13, 93) | 987 | 7 / 20 | 27,04 s | 27,14 s | +0,11 s |
+| **Aleatoria** | **Promedio** | $N_4 = 11{,}2$ | | **38 / 90 (42 %)** | **26,84 s** | **26,94 s** | **+0,10 s** |
+| Priorizada | 1 | (96, 9, 95) | 991 | 9 / 9 | 26,76 s | 26,85 s | +0,09 s |
+| Priorizada | 2 | (92, 16, 92) | 984 | 15 / 15 | 27,12 s | 27,22 s | +0,10 s |
+| Priorizada | 3 | (95, 10, 95) | 990 | 10 / 10 | 26,70 s | 26,79 s | +0,09 s |
+| Priorizada | 4 | (91, 18, 91) | 982 | 17 / 17 | 27,26 s | 27,36 s | +0,10 s |
+| Priorizada | 5 | (96, 8, 96) | 992 | 8 / 8 | 26,56 s | 26,65 s | +0,09 s |
+| **Priorizada** | **Promedio** | $N_4 = 12{,}2$ | | **59 / 59 (100 %)** | **26,88 s** | **26,98 s** | **+0,10 s** |
 
-### Cálculo Teórico por Política (Configuración Base)
+### Escenarios de variación temporal
 
-Dado que el Monitor resuelve el conflicto en `P1` sorteando la transición ganadora (`T1`, `T4` o `T6`) según los pesos configurados y reteniendo el token hasta que sus recursos queden disponibles, la distribución esperada de disparos $(N_1, N_4, N_6)$ queda determinada directamente por las probabilidades de selección de cada política:
+Para evaluar la sensibilidad del sistema, se modificaron los tiempos manteniendo los mismos pesos:
 
-#### 1. Política Aleatoria — Pesos $(1, 1, 1)$
-Cada rama posee igual probabilidad de selección ($P(T_1) = P(T_4) = P(T_6) = \frac{1}{3}$). Para $200$ transacciones, el valor esperado de ejecuciones por flujo es $N_1 = N_4 = N_6 = \frac{200}{3} \approx 66,67$:
+| Escenario | `red.tiempos.ms` | $D_1 / D_2 / D_3$ | Modelo |
+| :--- | :--- | :---: | :---: |
+| **1. Base** | `0,0,130,130,0,200,0,130,130,0` | 260 / 200 / 260 ms | $26\text{ s} + 0{,}07\text{ s}\cdot N_4$ |
+| **2. Alto riesgo pesado** | `0,0,130,130,0,400,0,130,130,0` | 260 / 400 / 260 ms | $26\text{ s} + 0{,}27\text{ s}\cdot N_4$ |
+| **3. Laterales rápidas** | `0,0,100,100,0,200,0,100,100,0` | 200 / 200 / 200 ms | $20\text{ s} + 0{,}10\text{ s}\cdot N_4$ |
 
-$$T_{\text{teórico (aleatoria)}} = \frac{200}{3} \cdot 210\text{ ms} + \max\left(\frac{200}{3} \cdot 170\text{ ms},\; \frac{200}{3} \cdot 190\text{ ms}\right)$$
+| Escenario | Política | $(N_1, N_4, N_6)$ | T4 elegida / candidata | $T_{\text{ideal}}$ | $T_{\text{práctico}}$ | Diferencia |
+| :--- | :--- | :---: | :---: | :---: | :---: | :---: |
+| 2. Alto riesgo pesado | Aleatoria | (92, 16, 92) | 11 / 25 | 30,32 s | 30,42 s | +0,10 s |
+| 2. Alto riesgo pesado | Aleatoria | (97, 7, 96) | 5 / 10 | 28,02 s | 28,12 s | +0,10 s |
+| 2. Alto riesgo pesado | Priorizada | (90, 19, 91) | 19 / 19 | 31,26 s | 31,37 s | +0,11 s |
+| 2. Alto riesgo pesado | Priorizada | (97, 5, 98) | 5 / 5 | 27,48 s | 27,57 s | +0,09 s |
+| 3. Laterales rápidas | Aleatoria | (98, 5, 97) | 3 / 9 | 20,60 s | 20,70 s | +0,10 s |
+| 3. Laterales rápidas | Aleatoria | (92, 15, 93) | 10 / 22 | 21,60 s | 21,68 s | +0,08 s |
+| 3. Laterales rápidas | Priorizada | (92, 15, 93) | 15 / 15 | 21,60 s | 21,68 s | +0,08 s |
+| 3. Laterales rápidas | Priorizada | (89, 23, 88) | 22 / 22 | 22,40 s | 22,50 s | +0,10 s |
 
-$$T_{\text{teórico (aleatoria)}} = 14\,000\text{ ms} + 12\,666,67\text{ ms} = 26\,666,67\text{ ms} \approx \mathbf{26,67\text{ s}}$$
+### Análisis de resultados
 
-#### 2. Política Priorizada — Pesos $(1, 3, 1)$
-Asignando peso $3$ a la transición `T4` (`politica.pesos=1,1,1,1,3,1,1,1,1,1`), la suma de pesos del grupo de conflicto es $1 + 3 + 1 = 5$, lo que establece las siguientes probabilidades teóricas:
-* **Tarjeta (`T1`):** $P(T_1) = \frac{1}{5} = 20\,\% \implies N_1 = 40$
-* **Alto riesgo (`T4`):** $P(T_4) = \frac{3}{5} = 60\,\% \implies N_4 = 120$
-* **Transferencia (`T6`):** $P(T_6) = \frac{1}{5} = 20\,\% \implies N_6 = 40$
+1. Cumplimiento de la ventana temporal. Las 18 ejecuciones terminaron entre $20{,}70$ y $31{,}37$ s, con los 9 hilos finalizados y exactamente 200 T-invariantes válidos en cada *log*.
 
-Sustituyendo en la ecuación analítica:
+2. Precisión del modelo. La diferencia entre $T_{\text{práctico}}$ y $T_{\text{ideal}}$ es prácticamente constante (entre $+0{,}08$ y $+0{,}11$ s) en todas las corridas y escenarios. El modelo predice tan bien porque el sistema está limitado por los recursos: con 9 hilos y 3 transacciones circulando, cada vez que un recurso se libera hay un hilo esperando para tomarlo, así que los recursos casi no quedan ociosos. Esa diferencia constante se atribuye a costos fijos de la ejecución: la creación de los hilos, la granularidad de `Thread.sleep()` y la escritura de los *logs*.
 
-$$T_{\text{teórico (priorizada)}} = 120 \cdot 210\text{ ms} + \max\Big(40 \cdot 170\text{ ms},\; 40 \cdot 190\text{ ms}\Big)$$
+3. Baja proporción de alto riesgo. En todas las ejecuciones, $N_4$ es bajo (entre 2 y 23 transacciones, es decir, entre el 1 % y el 12 %) y varía mucho de una corrida a otra. La causa es estructural: `T4` necesita `P7` y `P8` libres al mismo tiempo, mientras que las ramas laterales mantienen ocupado al menos uno de los dos recursos casi todo el tiempo. `T4` solo queda sensibilizada en los pocos instantes en que ninguna de las dos ramas laterales tiene su recurso tomado.
 
-$$T_{\text{teórico (priorizada)}} = 25\,200\text{ ms} + 7\,600\text{ ms} = 32\,800\text{ ms} = \mathbf{32,80\text{ s}}$$
+4. Efecto de la política. La política priorizada cumple su función: en el 100 % de las decisiones en que `T4` era candidata, fue la elegida (59 de 59 en la configuración base). Con la política aleatoria, en cambio, fue elegida en el 42 % de esos casos (38 de 90). Sin embargo, el número de transacciones de alto riesgo es similar entre políticas, porque la política solo decide entre las transiciones despertables (sensibilizadas, con hilos esperando y fuera de la espera temporal): puede dar prioridad a `T4` cuando compite, pero no puede generar más instantes en que los dos recursos estén libres. Aumentar más la proporción de alto riesgo exigiría mantener un recurso libre esperando a que se libere el otro, y eso reduciría el paralelismo de las ramas laterales.
 
-#### 3. Justificación de Calibración de Pesos y Arbitraje
-* Sin política / sorteo solo entre sensibilizadas: La rama central sufre inanición ($N_1 \approx 100,\; N_4 \approx 0,\; N_6 \approx 100$), resultando en $T_{\text{teórico}} = 100 \times 190\text{ ms} = \mathbf{19,00\text{ s}}$, por debajo del mínimo exigido de $20\text{ s}$.
-* Peso excesivo en `T4` (ej. peso $100$): Concentra casi la totalidad de las transacciones en la rama central ($N_4 \approx 200$), elevando el tiempo teórico a $200 \times 210\text{ ms} = \mathbf{42,00\text{ s}}$, por encima del límite superior de $40\text{ s}$.
-* Conclusión analítica base: Con pesos $(1, 3, 1)$, la política priorizada incrementa el tiempo teórico en $+6,13\text{ s}$ ($+23,0\,\%$) respecto de la aleatoria ($32,80\text{ s}$ frente a $26,67\text{ s}$), evidenciando el costo de perder paralelismo al priorizar un flujo que requiere ambos recursos simultáneamente.
-
----
-
-### Escenarios de Variación Temporal y Contraste Práctico
-
-Para analizar la sensibilidad del sistema frente a distintos perfiles de carga de trabajo, se evaluaron tres escenarios de retardos en `config.properties` manteniendo los pesos $(1, 1, 1)$ y $(1, 3, 1)$:
-
-| Escenario | Configuración `red.tiempos.ms` | Duración por Flujo ($D_1 / D_2 / D_3$) | Política |  $T_{\text{teórico}}$ (*a priori*)   |
-| :--- | :--- | :---: | :--- |:------------------------------------:|
-| **1. Base** | `0,0,85,85,0,210,0,95,95,0` | $170 / 210 / 190\text{ ms}$ | Aleatoria<br>Priorizada | $26,67\text{ s}$<br>$32,80\text{ s}$ |
-| **2. Alto riesgo pesado ($\uparrow T_5$)** | `0,0,75,75,0,240,0,85,85,0` | $150 / 240 / 170\text{ ms}$ | Aleatoria<br>Priorizada | $27,33\text{ s}$<br>$35,60\text{ s}$ |
-| **3. Laterales pesadas ($\uparrow T_{2,3,7,8}$)** | `0,0,120,120,0,140,0,130,130,0` | $240 / 140 / 260\text{ ms}$ | Aleatoria<br>Priorizada | $26,67\text{ s}$<br>$27,20\text{ s}$ |
-
-#### Interpretación de las Desviaciones entre Tiempo Teórico y Práctico
-1. Tiempo muerto por sincronización de dos recursos (`P7` y `P8`): La fórmula analítica asume que `T5` comienza inmediatamente al finalizar el ciclo previo. En la ejecución concurrente real, cuando la política selecciona `T4`, el hilo debe aguardar a que ambos recursos se liberen; si `P7` queda libre antes que `P8`, permanece ocioso hasta que finalice la transacción en curso en `P8`, sumando tiempos muertos no contemplados en la cota inferior.
-2. Impacto asimétrico de los retardos: Al incrementar $T_5$ (Escenario 2), la penalización recae principalmente sobre la política priorizada ($35,60\text{ s}$), ya que el $60\,\%$ de las transacciones se ejecutan de forma serializada. En cambio, al incrementar las ramas laterales (Escenario 3), el mayor paralelismo de la política aleatoria absorbe parte del aumento, igualando prácticamente ambos tiempos teóricos ($26,67\text{ s}$ vs. $27,20\text{ s}$).
-3. Sobrecarga operativa (Overhead) del entorno Java: El tiempo real medido incluye la contención por el `ReentrantLock` justo del monitor, el cambio de contexto entre los 7 hilos trabajadores, la precisión del planificador del sistema operativo en `Thread.sleep()` y la escritura sincronizada en disco del archivo de log.
-
-### Escenarios de Variación Temporal y Contraste Práctico
-
-Para evaluar la sensibilidad del sistema frente a distintos perfiles de carga de trabajo, se ejecutaron los tres escenarios configurados en `config/config.properties` bajo ambas políticas (`politica.tipo = 0` y `politica.tipo = 1`, con pesos $(1,1,1)$ y $(1,3,1)$), auditando cada archivo de *log* mediante `ValidadorRegex` para obtener la distribución exacta de invariantes $(N_1, N_4, N_6)$:
-
-| Escenario | Configuración `red.tiempos.ms` | Duración por Flujo ($D_1 / D_2 / D_3$) | Política | Distribución Real $(N_1, N_4, N_6)$ |  $T_{\text{teórico}}$ (*a priori*)   | $T_{\text{ideal}}$ (con $N_i$ reales) |                  $T_{\text{práctico}}$ (medido en Java)                  | *Overhead* ($T_{\text{práctico}} - T_{\text{ideal}}$) |
-| :--- | :--- | :---: | :--- | :---: |:------------------------------------:|:-------------------------------------:|:------------------------------------------------------------------------:|:-----------------------------------------------------:|
-| **1. Base** | `0,0,85,85,0,210,0,95,95,0` | $170 / 210 / 190\text{ ms}$ | Aleatoria<br>Priorizada | $(70, 58, 72)$<br>$(35, 123, 42)$ | $26,67\text{ s}$<br>$32,80\text{ s}$ | $25,86\text{ s}$<br>$33,81\text{ s}$  | $31,84\text{ s}$ (`31,88 s` total)<br>$38,46\text{ s}$ (`38,50 s` total) |         $+5,98\text{ s}$<br>$+4,65\text{ s}$          |
-| **2. Alto riesgo pesado ($\uparrow T_5$)** | `0,0,75,75,0,240,0,85,85,0` | $150 / 240 / 170\text{ ms}$ | Aleatoria<br>Priorizada | $(70, 69, 61)$<br>$(36, 127, 37)$ | $27,33\text{ s}$<br>$35,60\text{ s}$ | $27,06\text{ s}$<br>$36,77\text{ s}$  | $31,47\text{ s}$ (`31,48 s` total)<br>$38,66\text{ s}$ (`38,70 s` total) |         $+4,41\text{ s}$<br>$+1,89\text{ s}$          |
-| **3. Laterales pesadas ($\uparrow T_{2,3,7,8}$)** | `0,0,120,120,0,140,0,130,130,0` | $240 / 140 / 260\text{ ms}$ | Aleatoria<br>Priorizada | $(63, 66, 71)$<br>$(39, 126, 35)$ | $26,67\text{ s}$<br>$27,20\text{ s}$ | $27,70\text{ s}$<br>$27,00\text{ s}$  | $34,76\text{ s}$ (`34,76 s` total)<br>$33,92\text{ s}$ (`33,95 s` total) |         $+7,06\text{ s}$<br>$+6,92\text{ s}$          |
-
-*(Nota metodológica: el valor principal de $T_{\text{práctico}}$ corresponde al tiempo interno cronometrado por `Main` para completar los 200 invariantes, mientras que el valor entre paréntesis incluye la inicialización y el cierre del archivo de log).*
-
-#### Análisis de Resultados y Conclusiones Experimentales
-
-1. Cumplimiento integral de la ventana temporal: Todas las ejecuciones experimentales finalizaron estrictamente dentro del rango exigido de 20 a 40 segundos (entre `31,47 s` y `38,66 s`), con los 7 hilos trabajadores terminando limpiamente (`TERMINATED`) y exactamente $200$ T-invariantes completos verificados en cada archivo de *log*.
-2. Descomposición del desfasaje entre $T_{\text{teórico}}$ y $T_{\text{práctico}}$:
-    * Variación propia del sorteo ($T_{\text{ideal}} - T_{\text{teórico}}$): La fluctuación aleatoria en la proporción de ramas sorteadas explica variaciones menores alrededor de la esperanza matemática (por ejemplo, en el Escenario 1 Aleatoria se ejecutaron $58$ transacciones de alto riesgo frente a las $66,7$ esperadas, reduciendo la cota ideal de $26,67\text{ s}$ a $25,86\text{ s}$).
-    * Tiempo muerto por sincronización dual y contención ($T_{\text{práctico}} - T_{\text{ideal}}$): Introduce un *overhead* de entre $+1,89\text{ s}$ y $+7,06\text{ s}$ ($5\,\%$ a $25\,\%$). La causa dominante es el tiempo ocioso de recursos: cuando la política selecciona `T4` (Alto riesgo), retiene el token en `P1` hasta que ambos recursos (`P7` y `P8`) estén libres en simultáneo; el primer recurso en desocuparse queda inactivo esperando que finalice la transacción en curso del otro recurso. A esto se suma la contención por el `ReentrantLock` del monitor, los cambios de contexto de hilos y la escritura sincronizada del *log*.
-3. Sensibilidad asimétrica ante variaciones de tiempos:
-    * Incremento en $T_5$ (Escenario 2): Al aumentar el retardo de Alto riesgo a $240\text{ ms}$ y reducir las ramas laterales, el tiempo práctico de la política aleatoria se mantiene estable (`31,47 s`), mientras que la política priorizada alcanza el valor más alto de toda la serie (`38,66 s`) porque el $63,5\,\%$ de las transacciones ($N_4 = 127$) se ejecutan de manera serializada.
-    * Incremento en ramas laterales (Escenario 3): Al elevar los tiempos de Tarjeta ($240\text{ ms}$) y Transferencia ($260\text{ ms}$) y reducir Alto riesgo ($140\text{ ms}$), se invierte el orden relativo: la política priorizada resulta más veloz (`33,92 s` vs. `34,76 s`) debido a que concentra el $63\,\%$ de las operaciones en el flujo de menor costo temporal ($D_2 = 140\text{ ms}$), mientras que la aleatoria sufre mayor solapamiento y tiempos de espera cruzados ($+7,06\text{ s}$ de *overhead*).
+5. Sensibilidad a los tiempos. En el escenario 2, cada transacción de alto riesgo cuesta $270$ ms en lugar de $70$ ms, por lo que el tiempo total depende mucho más de $N_4$: pasa de $28{,}12$ s con $N_4 = 7$ a $31{,}37$ s con $N_4 = 19$. En el escenario 3, al acortar las ramas laterales, el tiempo se acerca al límite inferior de la ventana ($20{,}70$ a $22{,}50$ s). Esto muestra que la configuración base, con ramas de 260 ms, deja margen tanto respecto de los 20 s como de los 40 s.
