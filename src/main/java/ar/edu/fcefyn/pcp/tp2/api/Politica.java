@@ -1,7 +1,7 @@
 package ar.edu.fcefyn.pcp.tp2.api;
 
 public interface Politica {
-public interface Politica {
+
 
     /**
      * Se llama UNA sola vez, después de cada disparo exitoso.
