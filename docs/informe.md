@@ -102,9 +102,9 @@ Como $M_0(P_0) = 3$, en el arbol de alcanzabilidad pueden acumularse hasta 3 tok
 
 - Segmento previo al *fork* $S_A$
 
-Al aplicar estrictamente el algoritmo del paper, como $M(P_1)$ puede llegar a 3 si $T_0$ se dispara 3 veces seguidas, $\max(MS_A) = 3$. Por lo que tendríamos 9 hilos en total.
+Como $M(P_1)$ puede llegar a 3 si $T_0$ se dispara 3 veces seguidas, $\max(MS_A) = 3 $. 
 
-Pero en el enunciado se pide que "debe haber un hilo encargado de la ejecución de la transición anterior al conflicto y luego un hilo por invariante". Al $T_0$ ser una transición inmediata ie. $[0, 0] ms$ y el monitor opera con un disparo por ciclo, 1 hilo para $S_A$ alimenta $P_!$ sin bottleneck, lo que da un total de 7 hilos.
+3 hilos para $S_A$ alimentan $P_1$ sin bottleneck, lo que da un total de 9 hilos.
 
 #### Interaccion de Hilos con Monitor
 
@@ -141,18 +141,18 @@ Poseemos un `FileTransitionLogger` que cumple el rol de *Output Queue* para cont
 
 **Tabla 1: Estados del Sistema**
 
-|Transición|Semántica Temporal|Segmento|Hilo Asignado|Acción en Sistema|Recursos Manipulados|
-|---|---|---|---|---|---|
-|$T_0$|Inmediata $[0,0]$|$S_A$|*Worker-Admision*|Adminsión de Transacción|-|
-|$T_1$|Inmediata $[0,0]$|$S_B$|*Worker-Tarjeta*|Enrutamiento a flujo de tarjeta, inicio autorización|Toma $P_7$|
-|$T_2$|Temporal $[min,\infty)$|$S_B$|*Worker-Tarjeta*|Recepción de gateway|Retiene $P_7$|
-|$T_3$|Temporal $[min,\infty)$|$S_B$|*Worker-Tarjeta*|Confirmacion captura fondos con tarjeta|Libera $P_7$|
-|$T_4$|Inmediata $[0,0]$|$S_C$|*Worker-AltoRiesgo*|Enrutamiento a flujo alto riesgo|Toma $P_7 \wedge P_8$|
-|$T_5$|Temporal $[min,\infty)$|$S_C$|*Worker-AltoRiesgo*|Finalización scoring y aprobación de riesgo|Libera $P_7 \wedge P_8$|
-|$T_6$|Inmediata $[0,0]$|$S_D$|*Worker-Transferencia*|Enrutamiento a flujo de transferencia|Toma $P_8$|
-|$T_7$|Temporal $[min,\infty)$|$S_D$|*Worker-Transferencia*|Finalización de validación cuenta destino|Retiene $P_8$|
-|$T_8$|Temporal $[min,\infty)$|$S_D$|*Worker-Transferencia*|Ejecución de transferencia|Libera $P_8$|
-|$T_9$|Inmediata $[0,0]$|$S_E$|*Worker-Liquidacion_i(1,2,3)*|Confirmación al cliente, liquidación, y liberación|Devuelve token a $P_0$|
+|Transición|Semántica Temporal|Segmento| Hilo Asignado                 |Acción en Sistema|Recursos Manipulados|
+|---|---|---|-------------------------------|---|---|
+|$T_0$|Inmediata $[0,0]$|$S_A$| *Worker-Admision_i(1,2,3)*    |Adminsión de Transacción|-|
+|$T_1$|Inmediata $[0,0]$|$S_B$| *Worker-Tarjeta*              |Enrutamiento a flujo de tarjeta, inicio autorización|Toma $P_7$|
+|$T_2$|Temporal $[min,\infty)$|$S_B$| *Worker-Tarjeta*              |Recepción de gateway|Retiene $P_7$|
+|$T_3$|Temporal $[min,\infty)$|$S_B$| *Worker-Tarjeta*              |Confirmacion captura fondos con tarjeta|Libera $P_7$|
+|$T_4$|Inmediata $[0,0]$|$S_C$| *Worker-AltoRiesgo*           |Enrutamiento a flujo alto riesgo|Toma $P_7 \wedge P_8$|
+|$T_5$|Temporal $[min,\infty)$|$S_C$| *Worker-AltoRiesgo*           |Finalización scoring y aprobación de riesgo|Libera $P_7 \wedge P_8$|
+|$T_6$|Inmediata $[0,0]$|$S_D$| *Worker-Transferencia*        |Enrutamiento a flujo de transferencia|Toma $P_8$|
+|$T_7$|Temporal $[min,\infty)$|$S_D$| *Worker-Transferencia*        |Finalización de validación cuenta destino|Retiene $P_8$|
+|$T_8$|Temporal $[min,\infty)$|$S_D$| *Worker-Transferencia*        |Ejecución de transferencia|Libera $P_8$|
+|$T_9$|Inmediata $[0,0]$|$S_E$| *Worker-Liquidacion_i(1,2,3)* |Confirmación al cliente, liquidación, y liberación|Devuelve token a $P_0$|
 
 **Tabla 2: Eventos del Sistema**
 
