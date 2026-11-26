@@ -39,10 +39,12 @@ public class Main {
         String nombrePolitica = obtenerNombrePolitica(codigoPolitica);
 
         String timestamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss")); // time extract for unique log creation
-        Path rutaLogDisparos = Path.of("resultados", "disparos_" + nombrePolitica + "_" + timestamp + ".log"); // path for firing log
-        Path rutaResumen = Path.of("resultados", "resumen_" + nombrePolitica + "_" + timestamp + ".txt"); // path for final result summary
+        Path rutaLogDisparos = Path.of("resultados", "disparos_" + nombrePolitica + "_" + timestamp + ".log"); // path for logger of firings
+        Path rutaLogDecisiones = Path.of("resultados", "decisiones_" + nombrePolitica + "_" + timestamp + ".log"); // path for logger decisions
+        Path rutaResumen = Path.of("resultados", "resumen_" + nombrePolitica + "_" + timestamp + ".txt");// path for summary
 
-        FileTransitionLogger logger = new FileTransitionLogger(rutaLogDisparos); // create logger
+        FileTransitionLogger logger = new FileTransitionLogger(rutaLogDisparos, rutaLogDecisiones); //create logger
+
         List<Thread> hilos;
         long inicioNs;
         long finNs;
@@ -109,10 +111,12 @@ public class Main {
      * using S^3PR & Case 1,2 from assignmetn
      */
     private static List<Thread> crearHilosDeSegmentos(MonitorInterface monitor) {
-        List<Thread> hilos = new ArrayList<>(7);
+        List<Thread> hilos = new ArrayList<>(9);
 
-        // Segment SA (previous to conflicto in P1): 1 thread for {T0}
-        hilos.add(new Thread(new SegmentWorker("SA", monitor, 0), "Hilo-SA-Admision")); // this thread holds no decision over which flow has to goto next, that is managed by policy
+        // Segment SA (previous to conflicto in P1): 3 threads for {T0}
+        for (int i = 1; i <= 3; i++) {
+            hilos.add(new Thread(new SegmentWorker("SA-" + i, monitor, 0), "Hilo-SA-Admision-" + i));
+        }
 
         // Segment SB (branch cards): 1 hilo for {T1, T2, T3}
         hilos.add(new Thread(new SegmentWorker("SB", monitor, 1, 2, 3), "Hilo-SB-Tarjeta"));

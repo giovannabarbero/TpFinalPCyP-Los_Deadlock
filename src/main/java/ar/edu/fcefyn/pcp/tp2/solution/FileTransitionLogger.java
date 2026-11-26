@@ -8,19 +8,35 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
+import java.util.ArrayList;
+import java.util.List;
 
 public class FileTransitionLogger implements TransitionLogger {
-    private final BufferedWriter writer;
-    private final Path archivoLog;
+    private final BufferedWriter writerDisparos;
+    private final BufferedWriter writerDecisiones;
+    private final Path archivoLogDisparos;
+    private final Path archivoLogDecisiones;
     private long totalDisparos = 0;
 
-    public FileTransitionLogger(Path archivoLog) throws IOException {
-        this.archivoLog = archivoLog;
-        if (archivoLog.getParent() != null) {
-            Files.createDirectories(archivoLog.getParent());
+    public FileTransitionLogger(Path archivoLogDisparos, Path archivoLogDecisiones) throws IOException {
+        this.archivoLogDisparos = archivoLogDisparos;
+        this.archivoLogDecisiones = archivoLogDecisiones;
+
+        if (archivoLogDisparos.getParent() != null) {
+            Files.createDirectories(archivoLogDisparos.getParent());
         }
-        this.writer = Files.newBufferedWriter(
-                archivoLog,
+        if (archivoLogDecisiones.getParent() != null) {
+            Files.createDirectories(archivoLogDecisiones.getParent());
+        }
+
+        this.writerDisparos = Files.newBufferedWriter(
+                archivoLogDisparos,
+                StandardCharsets.UTF_8,
+                StandardOpenOption.CREATE,
+                StandardOpenOption.TRUNCATE_EXISTING
+        );
+        this.writerDecisiones = Files.newBufferedWriter(
+                archivoLogDecisiones,
                 StandardCharsets.UTF_8,
                 StandardOpenOption.CREATE,
                 StandardOpenOption.TRUNCATE_EXISTING
@@ -30,7 +46,7 @@ public class FileTransitionLogger implements TransitionLogger {
     @Override
     public synchronized void logTransition(int transition) {
         try {
-            writer.write("T" + transition + " ");
+            writerDisparos.write("T" + transition + " ");
             totalDisparos++;
         } catch (IOException e) {
             throw new RuntimeException("error al escribir disparo T" + transition + " en el log", e);
@@ -39,24 +55,62 @@ public class FileTransitionLogger implements TransitionLogger {
 
     @Override
     public synchronized void logDecision(boolean[] candidatas, int elegida) {
-        // TODO (Thomas): escribir candidatas y elegida en el log de decisiones
+        if (candidatas == null) {
+            return;
+        }
+        List<String> activas = new ArrayList<>();
+        for (int i = 0; i < candidatas.length; i++) {
+            if (candidatas[i]) {
+                activas.add("T" + i);
+            }
+        }
+        if (activas.size() < 2) {
+            return;
+        }
+
+        String textoElegida = (elegida >= 0) ? "T" + elegida : "NINGUNA";
+        String linea = "candidatas=" + String.join(", ", activas) + " elegida=" + textoElegida + System.lineSeparator();
+
+        try {
+            writerDecisiones.write(linea);
+        } catch (IOException e) {
+            throw new RuntimeException("error al escribir decisión en el log", e);
+        }
     }
 
     @Override
     public synchronized void close() {
+        IOException error = null;
         try {
-            writer.flush();
-            writer.close();
+            writerDisparos.flush();
         } catch (IOException e) {
-            throw new RuntimeException("error al cerrar el archivo de log: " + archivoLog, e);
+            error = e;
+        }
+        try {
+            writerDisparos.close();
+        } catch (IOException e) {
+            if (error == null) error = e;
+        }
+
+        try {
+            writerDecisiones.flush();
+        } catch (IOException e) {
+            if (error == null) error = e;
+        }
+        try {
+            writerDecisiones.close();
+        } catch (IOException e) {
+            if (error == null) error = e;
+        }
+
+        if (error != null) {
+            throw new RuntimeException("error al cerrar los archivos de log", error);
         }
     }
 
-    public synchronized long getTotalDisparos() {
-        return totalDisparos;
-    }
+    public synchronized long getTotalDisparos() {return totalDisparos;}
 
-    public Path getArchivoLog() {
-        return archivoLog;
-    }
+    public Path getArchivoLogDisparos() {return archivoLogDisparos;}
+
+    public Path getArchivoLogDecisiones() {return archivoLogDecisiones;}
 }
